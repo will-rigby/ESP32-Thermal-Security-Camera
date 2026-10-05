@@ -1,5 +1,7 @@
 # Third-party components
 
+The repository's top-level MIT license applies to project-authored code and documentation only. Third-party files retain their own license terms and notices; in particular, it does not grant rights to the vendor sensor archive described below.
+
 ## Waveshare / Meridian sensor implementation
 
 The Arduino adapter follows the hardware protocol, initialization and calibration flow from the [Waveshare thermal camera reference](https://www.waveshare.com/wiki/Thermal-Camera-ESP32-Module), as distributed in [0015/ESP32_Thermal_Camera_Viewer](https://github.com/0015/ESP32_Thermal_Camera_Viewer/tree/4fe4e6ad8b9c04d448908ac34115d7c595fd31d0/senxorESP32S3), commit `4fe4e6ad8b9c04d448908ac34115d7c595fd31d0`.

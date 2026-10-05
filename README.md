@@ -1,10 +1,34 @@
-# ESP32 thermal security camera
+# ESP32 Thermal Security Camera
 
-Arduino firmware for the **Waveshare Thermal-45-Camera-ESP32-Module**, with an MI0802 80 x 62 sensor, 16 MB flash and 8 MB OPI PSRAM. It serves a thermal viewer and configuration page, provides native USB MJPEG video, and detects warm-object occupancy in one rectangular ROI without a connected viewer.
+![Project artwork](docs/project-art.png)
 
-Firmware **0.2.2** refreshes the viewer and settings with independent **Small objects** and **Large objects** panels. Each lights green when its existing detection channel is occupied, with current region area and peak temperature. The responsive layout includes both panels in fullscreen. Detection thresholds, acquisition, MQTT and saved settings are unchanged; the sensor recovery fixes from 0.2.1 remain in place.
 
-**Hardware commissioning is still in progress.** The 0.2.1 board test passed 26 protected settings saves and a forced capture interruption with zero receive/allocation errors. Concurrent USB and HTTP viewing delivered about 7.4 FPS during settings changes, with at least 21 KB internal heap headroom. The sensor acquires about 21–22 FPS; the 10 FPS video target is not yet sustained. Temperature accuracy, long-term operation and the requested 5–12 m detection range remain unverified. Manual BOOT recovery and USB-command reflashing have been demonstrated. Follow [the validation record](docs/HARDWARE_VALIDATION.md) before relying on detection.
+This project started with a very common problem: a possum kept eating our vegetables. I'd purchased a Waveshare ESP32 Thermal Camera Module a while ago and it had been sitting on my shelf looking for a project. I threw it in my bag to play around with when I had some free time. The result is an experimental thermal camera and occupancy detector that can integrate with Home Assistant.
+
+The firmware uses the module's MI0802 80 × 62 thermal sensor, 16 MB flash and 8 MB OPI PSRAM. It serves a browser-based thermal viewer and settings page, streams MJPEG over native USB, and detects warm regions in a user-selected rectangular region of interest (ROI). Detection continues without a browser connected. MQTT and Home Assistant discovery are available for local integrations.
+
+Firmware **0.2.2** includes separate **Small objects** and **Large objects** panels in the viewer and settings page. Each reports occupancy, region area and peak temperature, and both remain visible in fullscreen. The two channels classify connected regions by pixel area; they do not identify species or physical size.
+
+**Project status:** Firmware builds and core features have been exercised, but hardware commissioning is ongoing. The 10 FPS USB video target has not been sustained in testing. Absolute temperature accuracy, long-term operation and reliable detection range remain unverified. See [the validation record](docs/HARDWARE_VALIDATION.md) for completed checks and open items.
+
+## Features
+
+- Browser viewer, settings page, snapshots and configurable palettes.
+- Native USB UVC MJPEG video and diagnostic serial console.
+- Independent small- and large-region occupancy channels.
+- Local MQTT state/events and Home Assistant MQTT discovery.
+- Persistent settings, ROI editing and empty-scene relearning.
+
+## Contents
+
+- [Hardware and installation](#arduino-ide-setup)
+- [Connect and configure](#first-connection)
+- [Viewer and detection](#viewer-and-detection)
+- [USB commissioning](#usb-commissioning)
+- [MQTT and API](#mqtt-and-api)
+- [Build and checks](#reproducible-builds-and-tests)
+- [Limitations and safety](#limits)
+- [License](#license)
 
 ## Arduino IDE setup
 
@@ -49,9 +73,17 @@ The palette auto-ranges each frame; detection always uses native temperature val
 
 If the image is mirrored, check **Flip image horizontally** and save. This changes the browser stream, snapshots and USB output together. ROI dragging and detection overlays follow the displayed orientation; stored ROI and MQTT coordinates remain native sensor coordinates. The option defaults to off and is saved in Preferences. A USB viewer may also apply its own preview mirroring, so compare with the browser image when choosing the setting.
 
+## Viewer and detection
+
 The main page shows the thermal image beside two detection panels, with controls for full screen and **Settings**. Below 900 pixels wide the panels move below the image. Green means **Detected**, neutral means **Clear**, amber means **Warming up / Learning**, and red means **Unavailable**. Both channels can light together. During the existing clear delay a panel stays green but hides measurements when no current region exists. Status polling continues when video is paused; failed or stale status removes green, with a 2.5-second connection watchdog and request timeout.
 
+![Thermal viewer with independent small and large object detection panels](docs/detection.png)
+
+![Small object detection example](docs/small-object-detection.png)
+
 `/settings` keeps the preview and draggable ROI together, with compact detection panels underneath. Image and Detection remain expanded; Wi-Fi, MQTT / Home Assistant and diagnostics are collapsible. Changes still require **Save settings**. Select **Fire** (the original palette), **Ironbow**, **Rainbow**, **White hot** or **Black hot**, then save. Palette changes affect all video outputs; temperatures and detection thresholds are unchanged. A save restarts background learning, as in earlier firmware.
+
+![Settings page with thermal preview and configuration panels](docs/settings.png)
 
 **Large object starts at** defaults to **16 connected native pixels**. With the default four-pixel minimum, regions of 4–15 pixels are small and regions of 16 or more are large. Each channel has its own activation/clear timer. Separate small and large regions can occupy both channels; touching regions merge, and crossing the cutoff can leave both channels occupied briefly during the clear delay. Size means area in the thermal image, not physical dimensions or person/animal classification. A cutoff at or below the minimum makes every qualifying region large; a cutoff beyond the ROI's area prevents large detections.
 
@@ -59,7 +91,7 @@ HTTP and MQTT use a trusted local network: there is no login, HTTPS or MQTT TLS 
 
 ## USB commissioning
 
-Before the thermal build, set `THERMAL_TEST_PATTERN` to `1` in `src/BuildOptions.h`, compile and upload. This produces a synthetic scene, a magenta bottom stripe, and the USB product name **Thermal Camera TEST**; Windows capture applications may list its interface as **Thermal camera**. It needs PSRAM but does not initialize the sensor or publish MQTT. Check enumeration, 320 x 240 MJPEG at 10 FPS, stop/start and reconnect in Windows Camera and OBS. Then restore the flag to `0` and upload the thermal build.
+Before the thermal build, set `THERMAL_TEST_PATTERN` to `1` in `firmware/ThermalSecurityCamera/src/BuildOptions.h`, compile and upload. This produces a synthetic scene, a magenta bottom stripe, and the USB product name **Thermal Camera TEST**; capture applications may list its interface as **Thermal camera**. It needs PSRAM but does not initialize the sensor or publish MQTT. Check enumeration, 320 x 240 MJPEG at 10 FPS, stop/start and reconnect in a UVC capture application. Then restore the flag to `0` and upload the thermal build.
 
 The pinned stock S3 SDK includes `CONFIG_TINYUSB_VIDEO_ENABLED=1`, one video streaming interface and a 64-byte packet buffer. The adapter registers one UVC function with Arduino's existing TinyUSB stack. **No custom board package or second USB stack is required by the build.** Windows enumeration, short captures, repeated opens and concurrent USB/browser viewing have passed; prolonged streaming, Windows Camera and OBS still need separate validation. USB clients may hold the last image during a sensor fault; use HTTP/MQTT health for fault detection.
 
@@ -102,4 +134,8 @@ On hardware, `scripts/check-api.ps1 -BaseUrl http://<device-ip>` performs bounde
 
 ## Limits
 
-Use fixed mounting and continuous USB power. A moving mount, sunshine, warm vegetation, rain, reflections, animals present during learning, and insufficient thermal contrast can change results. Startup learns the scene as it is, including existing occupants. This detects warm regions; it does not classify people/animals, count occupants, track individuals or record video. In particular, small-animal performance at 12 m has not been established.
+Use fixed mounting and continuous USB power. A moving mount, sunshine, warm vegetation, rain, reflections, animals present during learning, and insufficient thermal contrast can change results. Startup learns the scene as it is, including existing occupants. This detects warm regions; it does not classify people or animals, count occupants, track individuals or record video. Small-animal performance at 12 m has not been established. HTTP and MQTT have no authentication, HTTPS or MQTT TLS in this version; keep the device on a trusted local network and do not expose it to the Internet.
+
+## License
+
+Project-authored code and documentation are licensed under the [MIT License](LICENSE). Third-party components retain their own terms and notices; the project license does not grant rights to the bundled vendor sensor archive. See [third-party provenance and notices](THIRD_PARTY.md) before redistributing the complete firmware or repository.
