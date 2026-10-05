@@ -1,0 +1,23 @@
+{
+  "arduino_platform": {
+    "package": "esp32:esp32",
+    "version": "3.3.12",
+    "url": "https://github.com/espressif/arduino-esp32/releases/download/3.3.12/esp32-core-3.3.12.zip",
+    "sha256": "87401004f279a206781e368b66098a8383b7cf87cce7811a6afd0163503fa78f"
+  },
+  "s3_sdk": {
+    "version": "3.3.12",
+    "url": "https://github.com/espressif/arduino-esp32/releases/download/3.3.12/esp32s3-libs-3.3.12.zip",
+    "sha256": "08f4e7292fee97dc011dc64e3c670a9a4e83a6b52a604c4b9b18ab2885cdd092",
+    "idf_version": "5.5.5",
+    "idf_commit_prefix": "b774170ff46",
+    "tinyusb_commit_prefix": "88c7f0b81",
+    "lib_builder_commit_prefix": "6671d0b"
+  },
+  "sensor": {
+    "repository": "https://github.com/0015/ESP32_Thermal_Camera_Viewer.git",
+    "commit": "4fe4e6ad8b9c04d448908ac34115d7c595fd31d0",
+    "path": "senxorESP32S3/components/SenXorLib/libsenxorLib4M.a",
+    "sha256": "e8ecaacacd9c02eaf24d5fd4bc6be68ca1c46ce4cff451df98a1a0f7239108d8"
+  }
+}

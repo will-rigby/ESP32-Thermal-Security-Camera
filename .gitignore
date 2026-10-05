@@ -1,0 +1,11 @@
+.cache/
+build/
+dist/
+*.log
+*.jsonl
+*.bin
+*.elf
+*.map
+*.zip
+arduino-cli.local.yaml
+

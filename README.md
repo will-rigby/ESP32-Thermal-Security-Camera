@@ -1,0 +1,103 @@
+# ESP32 thermal security camera
+
+Arduino firmware for the **Waveshare Thermal-45-Camera-ESP32-Module**, with an MI0802 80 x 62 sensor, 16 MB flash and 8 MB OPI PSRAM. It serves a thermal viewer and configuration page, provides native USB MJPEG video, and detects warm-object occupancy in one rectangular ROI without a connected viewer.
+
+Firmware **0.2.1** fixes sensor corruption after saving settings: acquisition pauses during the flash write, discards partial frames and resumes. Receive faults invalidate all detection channels, reset capture and restart the detection settling period. It includes the dedicated thermal viewer at `/`, settings at `/settings`, five saved colour palettes, small/large occupancy channels and Home Assistant MQTT discovery introduced in 0.2.0. Existing settings carry forward; MQTT remains disabled until a broker is configured.
+
+**Hardware commissioning is still in progress.** The 0.2.1 board test passed 26 protected settings saves and a forced capture interruption with zero receive/allocation errors. Concurrent USB and HTTP viewing delivered about 7.4 FPS during settings changes, with at least 21 KB internal heap headroom. The sensor acquires about 21–22 FPS; the 10 FPS video target is not yet sustained. Temperature accuracy, long-term operation and the requested 5–12 m detection range remain unverified. Manual BOOT recovery and USB-command reflashing have been demonstrated. Follow [the validation record](docs/HARDWARE_VALIDATION.md) before relying on detection.
+
+## Arduino IDE setup
+
+1. Add `https://espressif.github.io/arduino-esp32/package_esp32_index.json` to **File > Preferences > Additional boards manager URLs**.
+2. In Boards Manager install **esp32 by Espressif Systems, version 3.3.12**. Use its bundled ESP-IDF 5.5.5 libraries; do not install a separate IDF framework or TinyUSB library.
+3. Copy the repository's `libraries/WaveshareSenxor` directory into your Arduino sketchbook's `libraries` directory, then restart the IDE. Alternatively run `scripts/package-library.ps1` and install `dist/WaveshareSenxor-0.1.1.zip` with **Sketch > Include Library > Add .ZIP Library**. Replace adapter version 0.1.0 when upgrading: 0.1.1 provides the capture pause/recovery methods needed by firmware 0.2.1. No other Library Manager dependencies are required.
+4. Open `firmware/ThermalSecurityCamera/ThermalSecurityCamera.ino`. Keep its adjacent `src` folder intact.
+5. Select these **Tools** settings:
+
+| Setting | Value |
+| --- | --- |
+| Board | ESP32S3 Dev Module |
+| CPU frequency | 240 MHz (WiFi) |
+| Flash size | 16 MB (128 Mb) |
+| Flash mode | QIO 80 MHz |
+| PSRAM | OPI PSRAM |
+| Partition scheme | 16M Flash (3MB APP/9.9MB FATFS) |
+| USB mode | USB-OTG (TinyUSB) |
+| USB CDC on boot | Disabled |
+| USB DFU / USB firmware MSC on boot | Disabled |
+| Upload mode | UART0 / Hardware CDC |
+| Upload speed | 115200 initially; 512000 or 921600 for faster Windows uploads once verified |
+| Arduino runs on / Events run on | Core 1 / Core 1 |
+| Core debug level | None |
+| Erase all flash before sketch upload | Disabled |
+
+6. Click **Verify**, then upload using the ROM download port. Hold **BOOT**, press/release **RESET**, then release BOOT. If the board has no reset button, reconnect USB while holding BOOT. Select the newly appearing COM port and upload. Reset after upload if needed.
+
+From firmware 0.1.4, normal native USB exposes the camera and a diagnostic serial COM port together, using the same TinyUSB stack. Keep **USB CDC on boot disabled**: the sketch explicitly registers its own CDC interface. The console accepts newline-terminated commands at 115200 baud; open it with DTR and RTS enabled. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/usb-command.ps1 -Port COM<n> -Command STATUS` reads health, and `CONFIG` reads redacted configuration. `SET {"flip_horizontal":true}` saves a partial configuration update. `BOOTLOADER` requests ROM download mode; manual BOOT/reset remains the recovery method if the application cannot respond. Composite USB and software bootloader entry passed on the tested board: normal diagnostics use COM13, ROM upload uses COM12 (Windows may assign different numbers elsewhere). From 0.1.5, automatic reset through baud-rate or RTS/DTR changes is disabled; use the explicit command or BOOT/reset. `Serial` log output continues to use UART0. A USB-to-UART bridge cannot carry UVC video: the data cable must reach the S3 native USB pins (D- GPIO19, D+ GPIO20). Verify your board revision against the [Waveshare documentation](https://www.waveshare.com/wiki/Thermal-Camera-ESP32-Module).
+
+## First connection
+
+With no Wi-Fi configured, join **Thermal-<device-id>**. The ID is the 12 lowercase hexadecimal digits of the station MAC, without separators. The setup password is **thermal-<last-six-digits>**, e.g. `thermal-a1b2c3`. Open **http://192.168.4.1/settings**, expand Wi-Fi and save your network settings. After connection the setup AP shuts down. Open the DHCP-assigned IP or `http://thermal-<device-id>.local` where mDNS is supported. If Wi-Fi cannot connect, the setup AP returns after about 30 seconds.
+
+From 0.1.4, unsuccessful station attempts stop after 30 seconds, followed by at least 60 seconds of quiet setup-AP time. Automatic retries wait while a setup client is connected; saving settings explicitly starts a new attempt. Wi-Fi events and memory-allocation failures are available through HTTP status or the USB console.
+
+Draw a rectangle on the image and save it. Settings survive restart in Preferences/NVS. Every successful save restarts background learning and reconnects MQTT. Startup temperatures drift substantially on the tested board, so the thermal build holds detection in `learning` for two minutes from the first valid frame, then performs the configured background learning (10 seconds by default). Video continues and the page shows a warm-up countdown. This is a commissioning safeguard, not proof of calibrated temperature accuracy. Keep the region empty during background learning. **Relearn empty scene** resets the background without changing settings.
+
+Default detection: a region at least **3 degrees C above its per-pixel background**, **4 eight-connected pixels**, present for **500 ms**, absent for **2 seconds**. Background updates have a 60-second time constant and exclude hot candidates, including while stationary. Learning and stale/invalid sensor data produce `learning` and `unavailable`, never an artificial `clear` event. After a frame outage, learning restarts. Persistent sensor faults currently require a board restart.
+
+The palette auto-ranges each frame; detection always uses native temperature values. The image is scaled into a 310 x 240 region of the 320 x 240 video, with 5-pixel side borders (aspect ratio preserved to the nearest pixel). Cyan shows the ROI, green the largest qualifying warm region. The top stripe is blue during learning, green when clear and red when occupied. Browser text shows temperatures, capture FPS and health.
+
+If the image is mirrored, check **Flip image horizontally** and save. This changes the browser stream, snapshots and USB output together. ROI dragging and detection overlays follow the displayed orientation; stored ROI and MQTT coordinates remain native sensor coordinates. The option defaults to off and is saved in Preferences. A USB viewer may also apply its own preview mirroring, so compare with the browser image when choosing the setting.
+
+The main page shows the thermal image with links for full screen and **Settings**. `/settings` retains the image, draggable ROI, temperatures and diagnostics alongside the configuration form. Select **Fire** (the original palette), **Ironbow**, **Rainbow**, **White hot** or **Black hot**, then save. Palette changes affect all video outputs; temperatures and detection thresholds are unchanged. A save restarts background learning, as in earlier firmware.
+
+**Large object starts at** defaults to **16 connected native pixels**. With the default four-pixel minimum, regions of 4–15 pixels are small and regions of 16 or more are large. Each channel has its own activation/clear timer. Separate small and large regions can occupy both channels; touching regions merge, and crossing the cutoff can leave both channels occupied briefly during the clear delay. Size means area in the thermal image, not physical dimensions or person/animal classification. A cutoff at or below the minimum makes every qualifying region large; a cutoff beyond the ROI's area prevents large detections.
+
+HTTP and MQTT use a trusted local network: there is no login, HTTPS or MQTT TLS in this version. Passwords are stored in ordinary NVS; the configuration API redacts them. The setup password is discoverable from the device ID. Do not expose these endpoints to the Internet.
+
+## USB commissioning
+
+Before the thermal build, set `THERMAL_TEST_PATTERN` to `1` in `src/BuildOptions.h`, compile and upload. This produces a synthetic scene, a magenta bottom stripe, and the USB product name **Thermal Camera TEST**; Windows capture applications may list its interface as **Thermal camera**. It needs PSRAM but does not initialize the sensor or publish MQTT. Check enumeration, 320 x 240 MJPEG at 10 FPS, stop/start and reconnect in Windows Camera and OBS. Then restore the flag to `0` and upload the thermal build.
+
+The pinned stock S3 SDK includes `CONFIG_TINYUSB_VIDEO_ENABLED=1`, one video streaming interface and a 64-byte packet buffer. The adapter registers one UVC function with Arduino's existing TinyUSB stack. **No custom board package or second USB stack is required by the build.** Windows enumeration, short captures, repeated opens and concurrent USB/browser viewing have passed; prolonged streaming, Windows Camera and OBS still need separate validation. USB clients may hold the last image during a sensor fault; use HTTP/MQTT health for fault detection.
+
+## MQTT and API
+
+Enter an external broker hostname/IPv4 address, port (default 1883), optional credentials and topic prefix (default `thermal/<device-id>`). All publications use QoS 1:
+
+| Topic suffix | Retained | Contents |
+| --- | --- | --- |
+| `/availability` | Yes | `online` or `offline`; `offline` is also the last will |
+| `/state` | Yes | JSON current state, ROI name, peak temperature and bounds |
+| `/event` | No | JSON `occupied`/`clear` transition and unique `event_id` |
+| `/small/state`, `/large/state` | Yes | Independent occupancy and largest connected-region size/bounds for each size class |
+| `/small/event`, `/large/event` | No | Size-specific occupied/clear transitions with distinct event IDs |
+
+**Home Assistant auto-discovery** defaults to enabled and uses `homeassistant/binary_sensor/thermal_<device-id>/<any|small|large>/config`. Configure the camera and Home Assistant's MQTT integration to use the same broker. Three occupancy entities appear under one device: **Occupancy**, **Small objects** and **Large objects**. Learning and sensor faults make the entities unavailable; device offline availability is also required. Discovery is retained at QoS 1 and republished after reconnect or an `online` birth message on `homeassistant/status`. This release uses Home Assistant's default discovery prefix and birth topic. See [Home Assistant discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) and [binary-sensor availability](https://www.home-assistant.io/integrations/binary_sensor.mqtt/#availability_mode).
+
+To remove these entities, turn discovery off and save **while the broker remains configured**; the camera publishes empty retained discovery messages. Turning discovery back on recreates them. Device/entity IDs stay stable when the camera's topic prefix changes on the same broker. Moving to another broker or disabling MQTT prevents automatic cleanup on the old broker; remove those retained records there if needed. Discovery payloads have been checked locally; a live broker/Home Assistant session is still required for end-to-end validation.
+
+Consumers should de-duplicate event IDs because QoS 1 permits duplicates. A new connection publishes the current state and availability. Unsent transitions from an old connection are discarded. State refreshes every 30 seconds; this is occupancy reporting, not a durable event log. See [API and payload details](docs/API.md).
+
+Endpoints: `/`, `/settings`, `/stream.mjpg`, `/snapshot.jpg`, `GET/PUT /api/config`, `GET /api/status`, and `POST /api/relearn`. Up to two simultaneous browser streams share the JPEG renderer with USB. The viewer and settings preview each use one stream. Sensor acquisition/detection run on core 1 independently of streaming and broker reconnection on core 0.
+
+## Reproducible builds and tests
+
+The Arduino IDE is sufficient for normal compilation and upload. For command-line builds, use Arduino CLI and PowerShell from the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ConfigFile arduino-cli.local.yaml
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ConfigFile arduino-cli.local.yaml -TestPattern
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+```
+
+Pass `-Cli 'path/to/arduino-cli.exe'` to bootstrap/build when the CLI is not on PATH. The bootstrap installs 3.3.12 in repository-local `.cache/arduino`, without changing the IDE's installed cores. It downloads the official package's toolchains, including other architectures, so allow several GB. Outputs are in `dist/camera` and `dist/test-pattern`. `-NoUsb` provides a browser-only diagnostic build. Native detector tests need a C++17 `g++` (GCC or LLVM-MinGW).
+
+Native tests also cover independent size channels, cutoff crossings, merged regions, stationary presence and palette mappings. `node tests/web_ui_tests.js` checks the actual embedded browser scripts with mocked DOM/API interactions (Node.js is optional for firmware builds). `scripts/check-features.ps1 -BaseUrl http://<device-ip> -Port COM<n>` checks the installed feature build with MQTT disabled: it temporarily changes palettes, size cutoff and discovery, checks JPEGs/payloads, restarts the board to test persistence, then restores the original three settings. It performs real settings writes and restarts learning; use it during commissioning with an empty ROI.
+
+On hardware, `scripts/check-api.ps1 -BaseUrl http://<device-ip>` performs bounded, read-only endpoint checks. On Windows, `scripts/check-usb.ps1` opens and closes the DirectShow camera three times and validates the captured frames; FFmpeg and FFprobe must be installed. It measures arrival rate with host timestamps and requires at least 9 FPS by default; `-MinimumFps 1` records a slow commissioning run without claiming the 10 FPS target. Supply `-Ffmpeg` and `-Ffprobe` with the actual executable paths if your PATH entries are launcher shims, so timeout handling stops the capture process itself. [Validation instructions](docs/HARDWARE_VALIDATION.md) cover MQTT failures, native USB, range and 24-hour operation. See [third-party provenance](THIRD_PARTY.md) for the pinned sensor archive and preserved notices.
+
+## Limits
+
+Use fixed mounting and continuous USB power. A moving mount, sunshine, warm vegetation, rain, reflections, animals present during learning, and insufficient thermal contrast can change results. Startup learns the scene as it is, including existing occupants. This detects warm regions; it does not classify people/animals, count occupants, track individuals or record video. In particular, small-animal performance at 12 m has not been established.
