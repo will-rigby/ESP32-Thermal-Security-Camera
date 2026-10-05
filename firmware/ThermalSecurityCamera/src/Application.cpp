@@ -219,7 +219,7 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"last_failed_alloc_size",lastAllocSize.load());
   cJSON_AddNumberToObject(root,"last_failed_alloc_caps",lastAllocCaps.load());
   addNetworkDiagnostics(root);
-  cJSON_AddStringToObject(root,"firmware","0.2.1"); cJSON_AddStringToObject(root,"arduino","3.3.12");
+  cJSON_AddStringToObject(root,"firmware","0.2.2"); cJSON_AddStringToObject(root,"arduino","3.3.12");
   cJSON_AddStringToObject(root,"idf",esp_get_idf_version());
   cJSON_AddNumberToObject(root,"reset_reason",int(esp_reset_reason()));
   cJSON_AddBoolToObject(root,"mqtt_connected",mqttConnected.load());

@@ -6,14 +6,16 @@ All temperatures are degrees C. Coordinates are integer native sensor pixels, or
 
 | Method and path | Response |
 | --- | --- |
-| `GET /` | Thermal-only viewer, with full-screen control and settings link; no external assets |
-| `GET /settings` | Configuration page with video, draggable ROI and diagnostics |
+| `GET /` | Thermal dashboard with small/large detection panels, full-screen control and settings link; no external assets |
+| `GET /settings` | Configuration page with video, draggable ROI, compact detection panels and diagnostics |
 | `GET /stream.mjpg` | Multipart MJPEG, boundary `thermalframe`, 320 x 240; maximum two clients |
 | `GET /snapshot.jpg` | Current JPEG; 503 when no frame younger than one second is available |
 | `GET /api/config` | Persisted settings, with password-presence flags instead of passwords |
 | `PUT /api/config` | Partial settings update; persist atomically before applying; 400 for invalid settings |
 | `GET /api/status` | State, temperatures, sensor age, capture FPS, memory and connection health |
 | `POST /api/relearn` | Restart learning on the next acquisition iteration |
+
+Firmware 0.2.2 changes only the dashboard presentation and advertised firmware version; the API/configuration schema is unchanged. Both pages read the existing debounced `small.state` and `large.state`, polling status with a 750 ms delay between completed requests and a single request in flight. Failed responses, stale sensor frames or a 2.5-second response watchdog make the panels unavailable. Video can be disabled without disabling detection indicators. Region measurements are shown only for an occupied channel with a current nonzero pixel area; a retained occupied state during the clear delay does not display old measurements.
 
 Write requests must contain `X-Thermal-Request: 1`; this prevents simple cross-origin form submissions, not access by other local clients. The server sends no permissive CORS headers. `PUT` accepts a 2–4096 byte JSON object. Unknown keys are ignored. An omitted password is preserved; an explicit empty string clears it. Wi-Fi passwords must be empty or 8–63 characters. Broker accepts hostname/IPv4, not URI/IPv6. Empty broker disables MQTT. The topic prefix must be nonempty, not start with `$`, contain no `+` or `#`, and have no trailing slash.
 
