@@ -13,6 +13,9 @@ Firmware **0.3.0** removes JPEG encoding and targets 20 FPS YUY2 video. USB carr
 
 ## Live demo
 
+
+https://github.com/user-attachments/assets/b12b31a2-12fd-46f8-abf0-7ed1122a8da8
+
 [▶ Watch the thermal camera demo (MP4)](docs/demo.mp4)
 
 The browser displays the live thermal image with no perceptible delay in hands-on use. Detection boxes are drawn separately over the scaled image, while the USB video stays free of overlays.
