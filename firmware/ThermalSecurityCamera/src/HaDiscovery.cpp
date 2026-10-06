@@ -31,7 +31,7 @@ String discoveryJson(const Config& cfg,const char* id,ObjectClass objectClass) {
   cJSON_AddStringToObject(device,"name",(String("Thermal camera ")+id).c_str());
   cJSON_AddStringToObject(device,"manufacturer","Waveshare");
   cJSON_AddStringToObject(device,"model","Thermal-45-Camera ESP32-S3");
-  cJSON_AddStringToObject(device,"sw_version","0.2.2");
+  cJSON_AddStringToObject(device,"sw_version","0.3.0");
   cJSON_AddStringToObject(device,"configuration_url",(String("http://thermal-")+id+".local/settings").c_str());
   char* encoded=cJSON_PrintUnformatted(root);String result=encoded?encoded:"{}";
   cJSON_free(encoded);cJSON_Delete(root);return result;

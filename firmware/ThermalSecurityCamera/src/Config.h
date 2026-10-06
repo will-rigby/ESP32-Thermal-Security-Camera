@@ -11,7 +11,7 @@ struct Config {
   char broker[128]{}, mqttUser[65]{}, mqttPassword[129]{}, topic[129]{};
   uint16_t port = 1883;
   bool flipHorizontal = false;
-  Palette palette = Palette::Fire;
+  Palette palette = Palette::WhiteHot;
   bool haDiscovery = true;
   DetectionSettings detection;
   uint32_t revision = 1;

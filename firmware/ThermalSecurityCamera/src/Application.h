@@ -9,7 +9,7 @@ struct Frame {
   Roi roi;
   uint32_t serial = 0;
   bool flipHorizontal = false;
-  Palette palette = Palette::Fire;
+  Palette palette = Palette::WhiteHot;
 };
 struct Status {
   Detection detection;
@@ -21,7 +21,7 @@ struct Status {
   float fps = 0;
   bool sensorReady = false;
   bool flipHorizontal = false;
-  Palette palette = Palette::Fire;
+  Palette palette = Palette::WhiteHot;
   char sensorError[96] = "starting";
 };
 extern ConfigStore configStore;

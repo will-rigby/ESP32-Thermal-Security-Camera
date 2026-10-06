@@ -17,7 +17,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     for(const id of ids){
       const el={value:'',checked:false,style:{},dataset:{},hidden:false,writes:0,
         getContext:()=>({clearRect(){},strokeRect(...args){rectangles.push(args)}}),
-        getBoundingClientRect:()=>({left:0,top:0,width:320,height:240}),setPointerCapture(){},
+        getBoundingClientRect:()=>({left:0,top:0,width:320,height:248}),setPointerCapture(){},
         removeAttribute(key){delete this[key]}};
       let content='';Object.defineProperty(el,'textContent',{get:()=>content,set:v=>{content=v;el.writes++}});
       elements[id]=el;
@@ -27,6 +27,11 @@ async function testWebUi(settingsHeader,viewerHeader) {
       exitFullscreen:async()=>{document.fullscreenElement=null}};
     const schedule=(fn,ms,repeat=false)=>{const id=++timerId;timers.set(id,{fn,at:time+ms,repeat:repeat?ms:0});return id};
     class AbortControllerMock{constructor(){this.signal={aborted:false}}abort(){this.signal.aborted=true}}
+    class ThermalVideoMock {
+      constructor(canvas,overlay,onState){this.running=false;this.onState=onState}
+      start(){this.running=true;this.onState('')}
+      stop(){this.running=false}
+    }
     const fetch=async(path,options={})=>{
       requests.push({path,options});
       if(options.method==='PUT')return {ok:!failSave,statusText:'Bad Request',json:async()=>failSave?{error:'Rejected settings'}:{saved:true}};
@@ -40,8 +45,8 @@ async function testWebUi(settingsHeader,viewerHeader) {
     };
     const settle=async()=>{for(let n=0;n<30;n++)await Promise.resolve()};
     const code=header.match(/<script>([\s\S]*?)<\/script>/)[1];
-    const api=new Function('document','fetch','setTimeout','clearTimeout','setInterval','performance','AbortController',
-      code+'\nreturn {poll};')(document,fetch,(fn,ms)=>schedule(fn,ms),id=>timers.delete(id),(fn,ms)=>schedule(fn,ms,true),{now:()=>time},AbortControllerMock);
+    const api=new Function('document','fetch','setTimeout','clearTimeout','setInterval','performance','AbortController','ThermalVideo',
+      code+'\nreturn {poll,video};')(document,fetch,(fn,ms)=>schedule(fn,ms),id=>timers.delete(id),(fn,ms)=>schedule(fn,ms,true),{now:()=>time},AbortControllerMock,ThermalVideoMock);
     await settle();
     async function advance(ms){
       const end=time+ms;let steps=0;
@@ -60,7 +65,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     const h=await harness(header),el=h.elements;
     const state=(channel)=>el[channel+'Panel'].dataset.state;
     assert(state('small')==='clear'&&state('large')==='clear',name+': initial clear states');
-    assert(el.feed.src.startsWith('/stream.mjpg'),name+': video starts');
+    assert(h.api.video.running,name+': video starts');
     h.status.small={state:'occupied',pixels:9,peak_c:31.25};h.status.state='occupied';await h.next();
     assert(state('small')==='occupied'&&state('large')==='clear',name+': small only');
     assert(el.smallState.textContent==='Detected'&&el.smallPixels.textContent==='9 pixels'&&el.smallPeak.textContent==='31.3 °C',name+': measurements');
@@ -75,7 +80,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     h.status.large={state:'occupied',pixels:20,peak_c:null};await h.next();
     assert(el.largePeak.textContent==='—'&&el.largePixels.textContent==='20 pixels',name+': missing temperature');
     h.status.video_enabled=false;await h.next();
-    assert(state('large')==='occupied'&&!el.feed.src&&el.stale.textContent==='Video paused',name+': detection independent of video');
+    assert(state('large')==='occupied'&&!h.api.video.running&&el.stale.textContent==='Video paused',name+': detection independent of video');
     h.status.sensor_warmup_ms=5500;await h.next();
     assert(state('large')==='learning'&&el.largeState.textContent==='Warming up'&&el.largePeak.textContent==='—',name+': warming');
     h.status.sensor_warmup_ms=0;h.status.small.state=h.status.large.state=h.status.state='learning';await h.next();
@@ -87,7 +92,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     h.status=baseline();h.status.small.state='occupied';await h.next();await h.advance(1750);
     assert(state('small')==='unavailable',name+': frozen frame counter');
     h.status=baseline();h.status.frames=100;await h.next();
-    h.mode='reject';await h.next();assert(state('small')==='unavailable'&&!el.feed.src,name+': failed request clears lights');
+    h.mode='reject';await h.next();assert(state('small')==='unavailable'&&!h.api.video.running,name+': failed request clears lights');
     h.mode='ok';h.status=baseline();h.status.frames=120;await h.next();assert(state('small')==='clear',name+': network recovery');
     h.mode='bad';await h.next();assert(state('large')==='unavailable',name+': malformed status');
     h.mode='ok';h.status=baseline();h.status.frames=140;h.status.small.state='occupied';await h.next();
@@ -108,9 +113,9 @@ async function testWebUi(settingsHeader,viewerHeader) {
   const h=await harness(settingsHeader),el=h.elements;
   assert(el.palette.value==='ironbow'&&el.ha_discovery.checked,'Saved palette/discovery loaded');
   assert(el.wifi_password.value===''&&el.mqtt_password.value==='','Passwords not populated');
-  assert(h.rectangles.at(-1)[0]===5+60*310/80,'Mirrored ROI overlay');
+  assert(h.rectangles.at(-1)[0]===60*8,'Mirrored ROI overlay');
   const pointer=(x,y)=>({clientX:x,clientY:y,pointerId:1});
-  el.roi.onpointerdown(pointer(5,0));el.roi.onpointerup(pointer(315,240));
+  el.roi.onpointerdown(pointer(0,0));el.roi.onpointerup(pointer(320,248));
   el.palette.value='black_hot';el.large_min_pixels.value='24';el.ha_discovery.checked=false;
   await el.settings.onsubmit({preventDefault(){}});
   let body=JSON.parse(h.requests.filter(r=>r.options.method==='PUT').at(-1).options.body);

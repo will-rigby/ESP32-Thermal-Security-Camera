@@ -28,23 +28,22 @@ try {
     foreach($palette in @('fire','ironbow','rainbow','white_hot','black_hot')) {
         Save-Config @{palette=$palette}
         # Settings writes and acquisition/rendering are asynchronous. Allow a
-        # fresh JPEG to pass through both tasks, and bypass host image caching.
+        # fresh YUY2 frame to pass through both tasks, and bypass host caching.
         Start-Sleep -Seconds 2
         $status=Invoke-RestMethod "$base/api/status" -TimeoutSec 8
         Require ($status.palette -eq $palette -and $status.video_enabled -and $status.heap_alloc_failures -eq 0) 'Palette application or memory health failed'
-        $file=Join-Path $out "$palette.jpg"
-        Invoke-WebRequest ("$base/snapshot.jpg?t="+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -OutFile $file -TimeoutSec 8
+        $file=Join-Path $out "$palette.bmp"
+        Invoke-WebRequest ("$base/snapshot.bmp?t="+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -OutFile $file -TimeoutSec 8
         $bitmap=[System.Drawing.Bitmap]::FromFile($file)
         try {
-            Require ($bitmap.Width -eq 320 -and $bitmap.Height -eq 240) 'Snapshot dimensions changed'
-            if($palette -in @('white_hot','black_hot')) {
-                $colourful=0; $total=0
-                for($y=12;$y -lt 228;$y+=4) { for($x=16;$x -lt 304;$x+=4) {
-                    $pixel=$bitmap.GetPixel($x,$y); $total++
-                    if([Math]::Abs([int]$pixel.R-$pixel.G) -gt 12 -or [Math]::Abs([int]$pixel.B-$pixel.G) -gt 12) { $colourful++ }
-                } }
-                Require ($colourful/$total -lt 0.03) "Grayscale palette produced unexpected colour: $palette"
-            }
+            Require ($bitmap.Width -eq 80 -and $bitmap.Height -eq 62) 'Snapshot dimensions changed'
+            # Colour palettes are browser-side; every device snapshot is grayscale.
+            $colourful=0
+            for($y=0;$y -lt 62;$y++) { for($x=0;$x -lt 80;$x++) {
+                $pixel=$bitmap.GetPixel($x,$y)
+                if($pixel.R -ne $pixel.G -or $pixel.B -ne $pixel.G) { $colourful++ }
+            } }
+            Require ($colourful -eq 0) "Grayscale snapshot produced unexpected colour: $palette"
         } finally { $bitmap.Dispose() }
     }
     Save-Config @{palette='ironbow';large_min_pixels=24;ha_discovery=$true}
@@ -83,4 +82,4 @@ for($attempt=0;$attempt -lt 15;$attempt++) {
 }
 $final | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'status.json')
 Require ($final.sensor_ready -and $final.video_frames -gt 0 -and $final.heap_alloc_failures -eq 0 -and $final.sensor_errors -eq 0) 'Final hardware health check failed'
-Write-Output 'PASS: viewer/settings routes, strict config validation, five live palettes, grayscale JPEGs, discovery payloads/removal, saved-setting migration and reboot persistence. Live MQTT/HA remain separate checks.'
+Write-Output 'PASS: viewer/settings routes, strict config validation, five saved palettes, grayscale BMPs, discovery payloads/removal, saved-setting migration and reboot persistence. Browser palette rendering and live MQTT/HA remain separate checks.'

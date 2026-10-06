@@ -2,6 +2,7 @@
 #include "Video.h"
 #include "WebUi.h"
 #include "ViewerUi.h"
+#include "VideoClientUi.h"
 #include <esp_http_server.h>
 #include <esp_heap_caps.h>
 #include <freertos/idf_additions.h>
@@ -52,58 +53,62 @@ esp_err_t relearn(httpd_req_t* r) {
   ++relearnGeneration; return json(r,"{\"learning\":true}");
 }
 esp_err_t snapshot(httpd_req_t* r) {
-  uint8_t* data=static_cast<uint8_t*>(ps_malloc(JpegCapacity)); size_t len=0; uint32_t serial=0;
-  if(!data) return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"No memory");
-  if(!copyJpeg(data,JpegCapacity,len,serial)) { free(data); return json(r,"{\"error\":\"No fresh frame\"}","503 Service Unavailable"); }
-  httpd_resp_set_type(r,"image/jpeg"); httpd_resp_set_hdr(r,"Cache-Control","no-store");
-  esp_err_t result=httpd_resp_send(r,reinterpret_cast<char*>(data),len); free(data); return result;
+  uint8_t* memory=static_cast<uint8_t*>(ps_malloc(VideoPacketBytes+BmpBytes));
+  if(!memory)return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"No memory");
+  if(!copyVideo(memory,VideoPacketBytes)) { free(memory);return json(r,"{\"error\":\"No fresh frame\"}","503 Service Unavailable"); }
+  auto bmp=memory+VideoPacketBytes;renderBmp(memory,bmp);
+  httpd_resp_set_type(r,"image/bmp");httpd_resp_set_hdr(r,"Cache-Control","no-store");
+  const auto result=httpd_resp_send(r,reinterpret_cast<char*>(bmp),BmpBytes);free(memory);return result;
 }
-void streamTask(void* arg) {
-  auto r=static_cast<httpd_req_t*>(arg);
-  uint8_t* data=static_cast<uint8_t*>(ps_malloc(JpegCapacity));
-  if(data) {
-    httpd_resp_set_type(r,"multipart/x-mixed-replace; boundary=thermalframe");
-    httpd_resp_set_hdr(r,"Cache-Control","no-store");
-    uint32_t previous=0,waitingSince=millis();
-    for(;;) {
-      size_t len=0; uint32_t serial=0;
-      if(copyJpeg(data,JpegCapacity,len,serial) && serial!=previous) {
-        char header[112]; int n=snprintf(header,sizeof(header),"--thermalframe\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",unsigned(len));
-        if(httpd_resp_send_chunk(r,header,n)!=ESP_OK ||
-           httpd_resp_send_chunk(r,reinterpret_cast<char*>(data),len)!=ESP_OK ||
-           httpd_resp_send_chunk(r,"\r\n",2)!=ESP_OK) break;
-        previous=serial; waitingSince=millis();
-      } else if(uint32_t(millis()-waitingSince)>3000) break;
-      vTaskDelay(pdMS_TO_TICKS(50));
-    }
-    free(data);
-    httpd_resp_send_chunk(r,nullptr,0);
-  } else httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"No memory");
-  httpd_req_async_handler_complete(r); --streams; vTaskDeleteWithCaps(nullptr);
+esp_err_t videoScript(httpd_req_t* r) {
+  httpd_resp_set_type(r,"application/javascript");httpd_resp_set_hdr(r,"Cache-Control","no-store");
+  return httpd_resp_send(r,VideoClientUi,HTTPD_RESP_USE_STRLEN);
 }
+struct StreamSession { uint32_t serial;uint8_t packet[VideoPacketBytes]; };
+void freeStream(void* context) { free(context);--streams; }
 esp_err_t stream(httpd_req_t* r) {
-  if(streams.fetch_add(1)>=2) { --streams; return json(r,"{\"error\":\"Two viewers already connected\"}","503 Service Unavailable"); }
-  httpd_req_t* async=nullptr;
-  if(httpd_req_async_handler_begin(r,&async)!=ESP_OK) { --streams; return ESP_FAIL; }
-  // Streaming never writes NVS. Configuration handlers retain the HTTP
-  // server's internal-RAM stack so Preferences writes remain safe.
-  if(xTaskCreatePinnedToCoreWithCaps(streamTask,"thermal-http-stream",4096,async,1,nullptr,0,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)!=pdPASS) {
-    --streams; httpd_resp_send_err(async,HTTPD_500_INTERNAL_SERVER_ERROR,"No task memory"); httpd_req_async_handler_complete(async);
+  // IDF 5.5.5 handles the upgrade without invoking this handler. A GET here
+  // is an ordinary HTTP request; create stream state on the first valid pull.
+  if(r->method==HTTP_GET)return httpd_resp_send_err(r,HTTPD_400_BAD_REQUEST,"WebSocket upgrade required");
+  httpd_ws_frame_t request{};
+  auto result=httpd_ws_recv_frame(r,&request,0);
+  if(result!=ESP_OK)return result;
+  // Pull protocol: exactly one binary byte (1) asks for the latest frame.
+  // No history or outbound frame queue is kept for a slow viewer.
+  if(request.type!=HTTPD_WS_TYPE_BINARY || request.len!=1 || !request.final)return ESP_FAIL;
+  uint8_t command=0;request.payload=&command;
+  result=httpd_ws_recv_frame(r,&request,1);
+  if(result!=ESP_OK || command!=1)return ESP_FAIL;
+  auto session=static_cast<StreamSession*>(r->sess_ctx);
+  if(!session) {
+    // An error closes an excess client. Session cleanup releases the slot.
+    if(streams.fetch_add(1)>=2) { --streams;return ESP_FAIL; }
+    session=static_cast<StreamSession*>(ps_malloc(sizeof(StreamSession)));
+    if(!session) { --streams;return ESP_ERR_NO_MEM; }
+    session->serial=0;r->sess_ctx=session;r->free_ctx=freeStream;
   }
-  return ESP_OK;
+  httpd_ws_frame_t response{};response.type=HTTPD_WS_TYPE_BINARY;
+  if(copyVideo(session->packet,VideoPacketBytes,session->serial)) {
+    response.payload=session->packet;response.len=VideoPacketBytes;
+    session->serial=get32(session->packet+12);
+  }
+  // Empty response means there is no new healthy frame; retry after 50 ms.
+  return httpd_ws_send_frame(r,&response);
 }
 }
 void startWeb() {
-  httpd_config_t cfg=HTTPD_DEFAULT_CONFIG(); cfg.max_uri_handlers=9; cfg.max_open_sockets=7;
-  cfg.stack_size=6144; cfg.recv_wait_timeout=3; cfg.send_wait_timeout=2; cfg.lru_purge_enable=true;
+  httpd_config_t cfg=HTTPD_DEFAULT_CONFIG();cfg.max_uri_handlers=10;cfg.max_open_sockets=7;
+  cfg.stack_size=6144;cfg.recv_wait_timeout=3;cfg.send_wait_timeout=1;cfg.lru_purge_enable=true;
   httpd_handle_t server=nullptr;
-  if(httpd_start(&server,&cfg)!=ESP_OK) { Serial.println("HTTP server failed"); return; }
+  if(httpd_start(&server,&cfg)!=ESP_OK) { Serial.println("HTTP server failed");return; }
   const httpd_uri_t routes[]={
-    {"/",HTTP_GET,home,nullptr}, {"/settings",HTTP_GET,settingsPage,nullptr}, {"/api/config",HTTP_GET,getConfig,nullptr},
-    {"/api/config",HTTP_PUT,putConfig,nullptr}, {"/api/status",HTTP_GET,status,nullptr},
-    {"/api/relearn",HTTP_POST,relearn,nullptr}, {"/snapshot.jpg",HTTP_GET,snapshot,nullptr},
-    {"/stream.mjpg",HTTP_GET,stream,nullptr}
+    {"/",HTTP_GET,home,nullptr},{"/settings",HTTP_GET,settingsPage,nullptr},
+    {"/api/config",HTTP_GET,getConfig,nullptr},{"/api/config",HTTP_PUT,putConfig,nullptr},
+    {"/api/status",HTTP_GET,status,nullptr},{"/api/relearn",HTTP_POST,relearn,nullptr},
+    {"/snapshot.bmp",HTTP_GET,snapshot,nullptr},{"/video.js",HTTP_GET,videoScript,nullptr}
   };
-  for(auto& route:routes) if(httpd_register_uri_handler(server,&route)!=ESP_OK) Serial.println("HTTP route registration failed");
+  for(auto& route:routes)if(httpd_register_uri_handler(server,&route)!=ESP_OK)Serial.println("HTTP route registration failed");
+  httpd_uri_t ws{};ws.uri="/stream.yuy2";ws.method=HTTP_GET;ws.handler=stream;ws.is_websocket=true;
+  if(httpd_register_uri_handler(server,&ws)!=ESP_OK)Serial.println("WebSocket route registration failed");
 }
 }

@@ -5,16 +5,22 @@
 
 This project started with a very common problem: a possum kept eating our vegetables. I'd purchased a Waveshare ESP32 Thermal Camera Module a while ago and it had been sitting on my shelf looking for a project. I threw it in my bag to play around with when I had some free time. The result is an experimental thermal camera and occupancy detector that can integrate with Home Assistant.
 
-The firmware uses the module's MI0802 80 × 62 thermal sensor, 16 MB flash and 8 MB OPI PSRAM. It serves a browser-based thermal viewer and settings page, streams MJPEG over native USB, and detects warm regions in a user-selected rectangular region of interest (ROI). Detection continues without a browser connected. MQTT and Home Assistant discovery are available for local integrations.
+The firmware uses the module's MI0802 80 × 62 thermal sensor, 16 MB flash and 8 MB OPI PSRAM. It serves a browser-based thermal viewer and settings page, streams uncompressed 80 × 62 YUY2 over native USB and WebSocket, and detects warm regions in a user-selected rectangular region of interest (ROI). Detection continues without a browser connected. MQTT and Home Assistant discovery are available for local integrations.
 
-Firmware **0.2.2** includes separate **Small objects** and **Large objects** panels in the viewer and settings page. Each reports occupancy, region area and peak temperature, and both remain visible in fullscreen. The two channels classify connected regions by pixel area; they do not identify species or physical size.
+Firmware **0.3.0** removes JPEG encoding and targets 20 FPS YUY2 video. USB carries a clean grayscale image; the browser scales it and draws thin detection boxes separately. It includes separate **Small objects** and **Large objects** panels in the viewer and settings page. Each reports occupancy, region area and peak temperature, and both remain visible in fullscreen. The two channels classify connected regions by pixel area; they do not identify species or physical size.
 
-**Project status:** Firmware builds and core features have been exercised, but hardware commissioning is ongoing. The 10 FPS USB video target has not been sustained in testing. Absolute temperature accuracy, long-term operation and reliable detection range remain unverified. See [the validation record](docs/HARDWARE_VALIDATION.md) for completed checks and open items.
+**Project status:** Firmware 0.3.0 has been flashed and both 80 × 62 YUY2 streams work on the camera. A short simultaneous run delivered 19.4 FPS over the browser WebSocket and 12.7 FPS over USB DirectShow; USB remains below the 20 FPS target. Browser latency feels imperceptible in hands-on use; end-to-end delay has not yet been measured. Absolute temperature accuracy, long-term operation and reliable detection range remain unverified. See [the validation record](docs/HARDWARE_VALIDATION.md) for completed checks and open items.
+
+## Live demo
+
+[▶ Watch the thermal camera demo (MP4)](docs/demo.mp4)
+
+The browser displays the live thermal image with no perceptible delay in hands-on use. Detection boxes are drawn separately over the scaled image, while the USB video stays free of overlays.
 
 ## Features
 
 - Browser viewer, settings page, snapshots and configurable palettes.
-- Native USB UVC MJPEG video and diagnostic serial console.
+- Native USB UVC YUY2 video and diagnostic serial console.
 - Independent small- and large-region occupancy channels.
 - Local MQTT state/events and Home Assistant MQTT discovery.
 - Persistent settings, ROI editing and empty-scene relearning.
@@ -69,7 +75,7 @@ Draw a rectangle on the image and save it. Settings survive restart in Preferenc
 
 Default detection: a region at least **3 degrees C above its per-pixel background**, **4 eight-connected pixels**, present for **500 ms**, absent for **2 seconds**. Background updates have a 60-second time constant and exclude hot candidates, including while stationary. Learning and stale/invalid sensor data produce `learning` and `unavailable`, never an artificial `clear` event. After a frame outage, learning restarts. Persistent sensor faults currently require a board restart.
 
-The palette auto-ranges each frame; detection always uses native temperature values. The image is scaled into a 310 x 240 region of the 320 x 240 video, with 5-pixel side borders (aspect ratio preserved to the nearest pixel). Cyan shows the ROI, green the largest qualifying warm region. The top stripe is blue during learning, green when clear and red when occupied. Browser text shows temperatures, capture FPS and health.
+The image auto-ranges each frame; detection always uses native temperature values. Both transports carry 80 × 62 grayscale YUY2 with no boxes, borders or status stripe. The browser enlarges the image at its native aspect ratio and draws cyan ROI and green small/large region boxes on a separate canvas, using metadata from the same frame. Browser text shows temperatures, generated-frame FPS and health. USB applications perform their own enlargement.
 
 If the image is mirrored, check **Flip image horizontally** and save. This changes the browser stream, snapshots and USB output together. ROI dragging and detection overlays follow the displayed orientation; stored ROI and MQTT coordinates remain native sensor coordinates. The option defaults to off and is saved in Preferences. A USB viewer may also apply its own preview mirroring, so compare with the browser image when choosing the setting.
 
@@ -81,7 +87,7 @@ The main page shows the thermal image beside two detection panels, with controls
 
 ![Small object detection example](docs/small-object-detection.png)
 
-`/settings` keeps the preview and draggable ROI together, with compact detection panels underneath. Image and Detection remain expanded; Wi-Fi, MQTT / Home Assistant and diagnostics are collapsible. Changes still require **Save settings**. Select **Fire** (the original palette), **Ironbow**, **Rainbow**, **White hot** or **Black hot**, then save. Palette changes affect all video outputs; temperatures and detection thresholds are unchanged. A save restarts background learning, as in earlier firmware.
+`/settings` keeps the preview and draggable ROI together, with compact detection panels underneath. Image and Detection remain expanded; Wi-Fi, MQTT / Home Assistant and diagnostics are collapsible. Changes still require **Save settings**. Select **Fire**, **Ironbow**, **Rainbow**, **White hot** (the new default) or **Black hot**, then save. Colour palettes are applied in the browser. USB and BMP snapshots stay White hot except when Black hot is selected. Existing saved palettes are preserved; temperatures and detection thresholds are unchanged. A save restarts background learning, as in earlier firmware.
 
 ![Settings page with thermal preview and configuration panels](docs/settings.png)
 
@@ -91,9 +97,9 @@ HTTP and MQTT use a trusted local network: there is no login, HTTPS or MQTT TLS 
 
 ## USB commissioning
 
-Before the thermal build, set `THERMAL_TEST_PATTERN` to `1` in `firmware/ThermalSecurityCamera/src/BuildOptions.h`, compile and upload. This produces a synthetic scene, a magenta bottom stripe, and the USB product name **Thermal Camera TEST**; capture applications may list its interface as **Thermal camera**. It needs PSRAM but does not initialize the sensor or publish MQTT. Check enumeration, 320 x 240 MJPEG at 10 FPS, stop/start and reconnect in a UVC capture application. Then restore the flag to `0` and upload the thermal build.
+Before the thermal build, set `THERMAL_TEST_PATTERN` to `1` in `firmware/ThermalSecurityCamera/src/BuildOptions.h`, compile and upload. This produces a synthetic scene at 20 FPS and the USB product name **Thermal Camera TEST**; capture applications may list its interface as **Thermal camera**. It needs PSRAM but does not initialize the sensor or publish MQTT. Check enumeration, 80 x 62 YUY2 at 20 FPS, stop/start and reconnect in a UVC capture application. Then restore the flag to `0` and upload the thermal build.
 
-The pinned stock S3 SDK includes `CONFIG_TINYUSB_VIDEO_ENABLED=1`, one video streaming interface and a 64-byte packet buffer. The adapter registers one UVC function with Arduino's existing TinyUSB stack. **No custom board package or second USB stack is required by the build.** Windows enumeration, short captures, repeated opens and concurrent USB/browser viewing have passed; prolonged streaming, Windows Camera and OBS still need separate validation. USB clients may hold the last image during a sensor fault; use HTTP/MQTT health for fault detection.
+The pinned stock S3 SDK includes `CONFIG_TINYUSB_VIDEO_ENABLED=1`, one video streaming interface and a 64-byte packet buffer. The adapter registers one UVC function with Arduino's existing TinyUSB stack. **No custom board package or second USB stack is required by the build.** The previous MJPEG path passed Windows enumeration, short captures and repeated opens. The new YUY2 descriptors, 80 x 62 resolution, repeated opens and concurrent USB/browser viewing need fresh hardware validation, including Windows Camera and OBS. USB clients may hold the last image during a sensor fault; use HTTP/MQTT health for fault detection.
 
 ## MQTT and API
 
@@ -113,7 +119,7 @@ To remove these entities, turn discovery off and save **while the broker remains
 
 Consumers should de-duplicate event IDs because QoS 1 permits duplicates. A new connection publishes the current state and availability. Unsent transitions from an old connection are discarded. State refreshes every 30 seconds; this is occupancy reporting, not a durable event log. See [API and payload details](docs/API.md).
 
-Endpoints: `/`, `/settings`, `/stream.mjpg`, `/snapshot.jpg`, `GET/PUT /api/config`, `GET /api/status`, and `POST /api/relearn`. Up to two simultaneous browser streams share the JPEG renderer with USB. The viewer and settings preview each use one stream. Sensor acquisition/detection run on core 1 independently of streaming and broker reconnection on core 0.
+Endpoints: `/`, `/settings`, `/video.js`, WebSocket `/stream.yuy2`, `/snapshot.bmp`, `GET/PUT /api/config`, `GET /api/status`, and `POST /api/relearn`. The former `/stream.mjpg` and `/snapshot.jpg` routes are removed (404). Up to two browser streams share the latest YUY2 frame with USB; each requests one fresh frame at a time, so slow viewers skip frames instead of building a queue. The viewer and settings preview each use one stream. Sensor acquisition/detection run on core 1 independently of streaming and broker reconnection on core 0.
 
 ## Reproducible builds and tests
 
@@ -124,13 +130,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ConfigFile arduino-cli.local.yaml
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ConfigFile arduino-cli.local.yaml -TestPattern
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+node tests/web_ui_tests.js
+node tests/video_tests.js
 ```
 
 Pass `-Cli 'path/to/arduino-cli.exe'` to bootstrap/build when the CLI is not on PATH. The bootstrap installs 3.3.12 in repository-local `.cache/arduino`, without changing the IDE's installed cores. It downloads the official package's toolchains, including other architectures, so allow several GB. Outputs are in `dist/camera` and `dist/test-pattern`. `-NoUsb` provides a browser-only diagnostic build. Native detector tests need a C++17 `g++` (GCC or LLVM-MinGW).
 
-Native tests also cover independent size channels, cutoff crossings, merged regions, stationary presence and palette mappings. `node tests/web_ui_tests.js` checks the actual embedded browser scripts with mocked DOM/API interactions: both detection channels, warm-up, learning, stale frames, connection loss/recovery, single-flight polling, request timeout, video pause, fullscreen, explicit saving, password handling and mirrored ROI editing (Node.js is optional for firmware builds). `scripts/check-features.ps1 -BaseUrl http://<device-ip> -Port COM<n>` checks the installed feature build with MQTT disabled: it temporarily changes palettes, size cutoff and discovery, checks JPEGs/payloads, restarts the board to test persistence, then restores the original three settings. It performs real settings writes and restarts learning; use it during commissioning with an empty ROI.
+Native video tests cover YUY2 layout, grayscale levels, mirroring, clean USB pixels, binary metadata and BMP snapshots. After the native tests, `node tests/video_tests.js` verifies the actual browser decoder against a C++-generated frame, including palette rendering, overlays, pacing, timeouts and reconnection. Native detector tests also cover independent size channels, cutoff crossings, merged regions, stationary presence and palette mappings. `node tests/web_ui_tests.js` checks the actual embedded browser scripts with mocked DOM/API interactions: both detection channels, warm-up, learning, stale frames, connection loss/recovery, single-flight polling, request timeout, video pause, fullscreen, explicit saving, password handling and mirrored ROI editing (Node.js is optional for firmware builds). `scripts/check-features.ps1 -BaseUrl http://<device-ip> -Port COM<n>` checks the installed feature build with MQTT disabled: it temporarily changes palettes, size cutoff and discovery, checks BMPs/payloads, restarts the board to test persistence, then restores the original three settings. It performs real settings writes and restarts learning; use it during commissioning with an empty ROI.
 
-On hardware, `scripts/check-api.ps1 -BaseUrl http://<device-ip>` performs bounded, read-only endpoint checks. On Windows, `scripts/check-usb.ps1` opens and closes the DirectShow camera three times and validates the captured frames; FFmpeg and FFprobe must be installed. It measures arrival rate with host timestamps and requires at least 9 FPS by default; `-MinimumFps 1` records a slow commissioning run without claiming the 10 FPS target. Supply `-Ffmpeg` and `-Ffprobe` with the actual executable paths if your PATH entries are launcher shims, so timeout handling stops the capture process itself. [Validation instructions](docs/HARDWARE_VALIDATION.md) cover MQTT failures, native USB, range and 24-hour operation. See [third-party provenance](THIRD_PARTY.md) for the pinned sensor archive and preserved notices.
+On hardware, `scripts/check-api.ps1 -BaseUrl http://<device-ip>` performs bounded, read-only endpoint checks. On Windows, `scripts/check-usb.ps1` opens and closes the DirectShow camera three times and validates the captured frames; FFmpeg and FFprobe must be installed. It measures arrival rate with host timestamps and requests 80 x 62 YUY2 at 20 FPS and requires at least 18 FPS by default; `-MinimumFps 1` records a slow commissioning run without claiming the 20 FPS target. Supply `-Ffmpeg` and `-Ffprobe` with the actual executable paths if your PATH entries are launcher shims, so timeout handling stops the capture process itself. [Validation instructions](docs/HARDWARE_VALIDATION.md) cover MQTT failures, native USB, range and 24-hour operation. See [third-party provenance](THIRD_PARTY.md) for the pinned sensor archive and preserved notices.
+
+For the new browser transport, `scripts/check-video.ps1 -BaseUrl http://<device-ip>` checks raw WebSocket headers/pixels and measures frame arrivals. Run it alongside USB capture when commissioning simultaneous use. After uploading 0.3.0, reconnect USB and select **80 x 62 / YUY2 / 20 FPS** in the capture application. Existing integrations using MJPEG or JPEG URLs must switch to the new endpoints described in [API.md](docs/API.md).
 
 ## Limits
 

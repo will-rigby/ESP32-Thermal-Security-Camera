@@ -8,14 +8,15 @@ All temperatures are degrees C. Coordinates are integer native sensor pixels, or
 | --- | --- |
 | `GET /` | Thermal dashboard with small/large detection panels, full-screen control and settings link; no external assets |
 | `GET /settings` | Configuration page with video, draggable ROI, compact detection panels and diagnostics |
-| `GET /stream.mjpg` | Multipart MJPEG, boundary `thermalframe`, 320 x 240; maximum two clients |
-| `GET /snapshot.jpg` | Current JPEG; 503 when no frame younger than one second is available |
+| WebSocket `/stream.yuy2` | Binary 80 x 62 YUY2 with per-frame metadata; maximum two clients |
+| `GET /video.js` | Embedded browser decoder and overlay renderer |
+| `GET /snapshot.bmp` | Uncompressed 80 x 62 grayscale BMP, no overlays; 503 when paused or no healthy frame younger than one second is available |
 | `GET /api/config` | Persisted settings, with password-presence flags instead of passwords |
 | `PUT /api/config` | Partial settings update; persist atomically before applying; 400 for invalid settings |
 | `GET /api/status` | State, temperatures, sensor age, capture FPS, memory and connection health |
 | `POST /api/relearn` | Restart learning on the next acquisition iteration |
 
-Firmware 0.2.2 changes only the dashboard presentation and advertised firmware version; the API/configuration schema is unchanged. Both pages read the existing debounced `small.state` and `large.state`, polling status with a 750 ms delay between completed requests and a single request in flight. Failed responses, stale sensor frames or a 2.5-second response watchdog make the panels unavailable. Video can be disabled without disabling detection indicators. Region measurements are shown only for an occupied channel with a current nonzero pixel area; a retained occupied state during the clear delay does not display old measurements.
+Firmware 0.3.0 replaces MJPEG with YUY2 and removes `/stream.mjpg` and `/snapshot.jpg` (404). Configuration and MQTT schemas are unchanged; new devices default to White hot and existing saved palettes are preserved. Both pages read the existing debounced `small.state` and `large.state`, polling status with a 750 ms delay between completed requests and a single request in flight. Failed responses, stale sensor frames or a 2.5-second response watchdog make the panels unavailable. Video can be disabled without disabling detection indicators. Region measurements are shown only for an occupied channel with a current nonzero pixel area; a retained occupied state during the clear delay does not display old measurements.
 
 Write requests must contain `X-Thermal-Request: 1`; this prevents simple cross-origin form submissions, not access by other local clients. The server sends no permissive CORS headers. `PUT` accepts a 2–4096 byte JSON object. Unknown keys are ignored. An omitted password is preserved; an explicit empty string clears it. Wi-Fi passwords must be empty or 8–63 characters. Broker accepts hostname/IPv4, not URI/IPv6. Empty broker disables MQTT. The topic prefix must be nonempty, not start with `$`, contain no `+` or `#`, and have no trailing slash.
 
@@ -37,7 +38,7 @@ Firmware 0.2.0 adds these saved settings (old configurations use the defaults):
 
 | Field | Default | Accepted values |
 | --- | --- | --- |
-| `palette` | `fire` | `fire`, `ironbow`, `rainbow`, `white_hot`, `black_hot` |
+| `palette` | `white_hot` | `fire`, `ironbow`, `rainbow`, `white_hot`, `black_hot`; colours are browser-side, USB/BMP use grayscale |
 | `large_min_pixels` | `16` | Integer 1–4960; connected-region areas at or above this value are large |
 | `ha_discovery` | `true` | JSON boolean; enables Home Assistant discovery on the configured broker |
 
@@ -51,11 +52,36 @@ Status includes the fields of `/state` below, plus `fps` (acquisition, not USB d
 
 Firmware 0.2.1 adds `sensor_recoveries` (capture restart attempts), `sensor_last_error_code` (last vendor bitmask; decimal 4 means data-available timeout), `sensor_recovering`, and `sensor_config_pauses` (configuration-save pauses). Counters persist until the ESP32 reboots; they do not mean the current frame is faulty. Saving settings briefly pauses capture before writing NVS, then discards partial frames and relearns the scene. Sensor errors immediately mark aggregate/small/large states unavailable; recovery returns them to learning without replaying previous transitions. A save during sensor initialization can return an error asking the caller to retry; no settings are written without a pause acknowledgement.
 
-Firmware 0.1.1 adds `video_fps` (rendered JPEGs per second), `video_frames` (total rendered JPEGs), `jpeg_bytes` (latest JPEG size), and `render_ms` (latest render and encode duration). These distinguish sensor acquisition from rendering; USB/browser delivery must still be measured at the receiving host.
+Video diagnostics in 0.3.0: `video_fps` (generated YUY2 frames per second), `video_frames` (total generated frames), `video_format` (`YUY2`), `video_width` (80), `video_height` (62), `video_target_fps` (20), `frame_bytes` (9920), `render_us` (latest conversion duration) and `render_ms` (the same duration in milliseconds). `jpeg_bytes` is removed. These distinguish sensor acquisition from conversion; USB/browser delivery and end-to-end lag must still be measured at the receiving host.
 
 Firmware 0.1.2 adds `sensor_warmup_ms`, the remaining startup hold time. While positive, valid sensor frames can be displayed (`sensor_ready=true`), but detection remains `learning` and emits no occupied/clear transitions. Temperatures during this hold are unsettled. Background learning starts after the hold ends. The default hold is 120 seconds after the first valid frame; synthetic mode skips it. This duration is an initial safeguard based on observed drift, not a manufacturer calibration guarantee.
 
-Streams stop after three seconds without a new JPEG. A failed sensor does not keep serving old snapshots. A USB host may freeze its last frame; check `/api/status` or MQTT rather than inferring health from the displayed USB picture.
+WebSocket requests receive an empty binary message when no new healthy frame is available. The browser reconnects after 1.5 seconds without progress or a reply; status polling separately controls sensor/pause availability. A failed sensor does not keep serving old snapshots. A USB host may freeze its last frame; check `/api/status` or MQTT rather than inferring health from the displayed USB picture.
+
+## YUY2 video protocol (0.3.0)
+
+USB advertises one uncompressed YUY2 format: 80 x 62, 16 bits/pixel, 20 FPS (500,000 units of 100 ns), 9,920 bytes per image. Pixels are row-major packed `Y0 U Y1 V`; Y is limited range 16–235 and U/V are always 128. White hot is used unless the saved palette is Black hot. Flip is already applied to pixels. No metadata, bounding boxes, borders or state stripes are included in the USB image.
+
+The browser opens `/stream.yuy2` as a WebSocket and sends a binary message containing the single byte `1` for each next frame. Keep one request in flight, paced at up to 20 per second. The response is one 9,984-byte binary message, or an empty binary message if there is no newer valid frame. Each connection remembers the last serial it sent. Malformed requests close the connection; a third simultaneous stream is closed. Disconnect frees the session buffer. Slow clients receive the newest frame on their next request; no frame history is queued.
+
+The response has a 64-byte header followed by the same 9,920 image bytes used by USB. All multibyte fields are little-endian; floats are IEEE-754 binary32. Reserved bytes are zero.
+
+| Offset | Type | Meaning |
+| --- | --- | --- |
+| 0 | 4 bytes | ASCII `YUY2` |
+| 4, 6 | uint16 each | Protocol version 1; header length 64 |
+| 8, 10 | uint16 each | Width 80; height 62 |
+| 12, 16 | uint32 each | Sensor frame serial; capture uptime in milliseconds (wraps) |
+| 20 | uint8 | Bit 0: horizontally flipped |
+| 21 | uint8 | Palette: Fire 0, Ironbow 1, Rainbow 2, White hot 3, Black hot 4 |
+| 22, 23 | uint8 each | State: unavailable 0, learning 1, clear 2, occupied 3; reserved |
+| 24, 28 | float32 each | Frame minimum and maximum Celsius |
+| 32, 40, 48 | four uint16 each | ROI, small bounds, large bounds: x, y, width, height |
+| 56, 58 | uint16 each | Current small and large region pixel counts |
+| 60 | 4 bytes | Reserved |
+| 64 | 9,920 bytes | Packed YUY2 pixels |
+
+Bounds stay in native sensor coordinates: mirror x as `80 - x - width` when the flip flag is set. Draw a class box only when its count and extents are nonzero. This keeps overlays synchronized with their image, independently of the slower occupancy/status poll. The browser expands Y to 0–255 and applies the selected palette locally (Black hot is already inverted in the pixels). ROI editing uses a separate canvas at the same 80:62 aspect ratio. Snapshots are 6,038-byte uncompressed top-down 8-bit grayscale BMPs with a 256-entry grayscale palette.
 
 ## MQTT
 
@@ -101,7 +127,7 @@ The USB composite device provides UVC video and CDC serial using one TinyUSB sta
 | `CONFIG` | Saved configuration with passwords redacted |
 | `DISCOVERY` | Read-only array of the three generated discovery topics/payloads; empty payloads when discovery is disabled |
 | `SET {json}` | Same partial settings validation/persistence as HTTP PUT |
-| `VIDEO OFF` / `VIDEO ON` | Temporarily stop/start rendering to diagnose CPU or encoder-memory pressure; acquisition/detection continue |
+| `VIDEO OFF` / `VIDEO ON` | Temporarily stop/start YUY2 output to USB/browser/snapshots; acquisition/detection continue |
 | `SENSOR RECOVER` | Reset capture on the acquisition task, preserving calibration and allocated buffers. Restarts the conservative 120-second detection settling hold. Does not reboot the ESP32 or erase settings. Use `REBOOT` if initial sensor startup failed or the fault persists. |
 | `REBOOT` | Restart the application |
 | `BOOTLOADER` | Enter ROM download mode for uploading |
