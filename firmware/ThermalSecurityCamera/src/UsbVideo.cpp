@@ -60,7 +60,7 @@ uint16_t descriptors(uint8_t* dest,uint8_t* interfaceNumber) {
 // prevents a recommit from clearing a just-submitted frame on the other core.
 void submitFrame(void*) {
   if(tud_mounted() && tud_video_n_streaming(0,0) && thermal::videoEnabled() &&
-     thermal::getStatus().sensorReady && uint32_t(millis()-pendingFrameMs)<=1000 &&
+     thermal::videoFrameUsable(pendingFrameMs) &&
      tud_video_n_frame_xfer(0,0,usbBuffer+thermal::VideoHeaderBytes,thermal::VideoFrameBytes)) {
     uint8_t* submitted=usbBuffer; usbBuffer=usbPrevious; usbPrevious=submitted;
     lastSubmitted=pendingSerial;
@@ -74,7 +74,9 @@ void usbTask(void*) {
     const bool streaming=mounted && tud_video_n_streaming(0,0);
     thermal::usbStreaming=streaming;
     if(streaming && !submissionPending.load() && uint32_t(millis()-lastAcceptedMs.load())>=thermal::VideoPeriodMs) {
-      if(thermal::copyVideo(usbBuffer,thermal::VideoPacketBytes,lastSubmitted.load())) {
+      // Repeat the current image at the fixed USB cadence. Its real sensor
+      // timestamp stays unchanged; live health is checked again at submission.
+      if(thermal::copyVideo(usbBuffer,thermal::VideoPacketBytes)) {
         // TinyUSB refuses a new frame while it owns the previous buffer. Only
         // swap after acceptance, so the active frame is never overwritten,
         // including host stop/recommit paths that omit the completion callback.

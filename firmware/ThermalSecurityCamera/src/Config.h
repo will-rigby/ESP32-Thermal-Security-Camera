@@ -10,6 +10,7 @@ struct Config {
   char ssid[33]{}, wifiPassword[65]{};
   char broker[128]{}, mqttUser[65]{}, mqttPassword[129]{}, topic[129]{};
   uint16_t port = 1883;
+  uint32_t videoPeriodMs = 50;
   bool flipHorizontal = false;
   Palette palette = Palette::WhiteHot;
   bool haDiscovery = true;

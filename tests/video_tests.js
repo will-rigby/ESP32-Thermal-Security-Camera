@@ -53,6 +53,25 @@ timers.get(video.deadline).fn();assert(next.closed,'Hung request times out');
 timers.get(video.retry).fn();const stalled=sockets.at(-1);stalled.open();
 time+=1600;stalled.receive(new ArrayBuffer(0));assert(stalled.closed,'No fresh frames triggers reconnect');
 video.stop();assert.strictEqual(video.running,false);assert.strictEqual(video.socket,null);
+for(const rate of [20,10,5,2,1,.5,.2,.1]) {
+  video.setRate(rate);video.start();const slow=sockets.at(-1);slow.open();slow.receive(packet());
+  assert.strictEqual(timers.get(video.timer).ms,1000/rate,'Pull interval follows selected rate');
+  time+=1000/rate;timers.get(video.timer).fn();
+  slow.receive(new ArrayBuffer(0));assert(!slow.closed,'Intentional held image remains valid');
+  const newFrame=packet();new DataView(newFrame).setUint32(12,99,true);
+  time+=50;timers.get(video.timer).fn();slow.receive(newFrame);
+  assert(!slow.closed,'Slow stream advances');video.stop();
+}
+video.setRate(.1);video.start();const changing=sockets.at(-1);changing.open();changing.receive(packet());
+const sends=changing.sent.length;video.setRate(20);
+assert.strictEqual(changing.sent.length,sends+1,'Rate increase wakes a slow timer');
+video.setRate(10);assert.strictEqual(changing.sent.length,sends+1,'Rate change never overlaps pending request');
+changing.receive(new ArrayBuffer(0));video.setRate(.1);
+time+=11600;changing.receive(new ArrayBuffer(0));assert(changing.closed,'Held image eventually expires');
+video.stop();
+video.setRate(.1);video.start();const hungSlow=sockets.at(-1);hungSlow.open();
+assert.strictEqual(timers.get(video.deadline).ms,1500,'Network timeout stays short at slow image rate');
+timers.get(video.deadline).fn();assert(hungSlow.closed);video.stop();
 editing=true;const settings=new Video({getContext:()=>context},{getContext:()=>overlay},()=>{});
 settings.draw(settings.decode(packet()));assert.strictEqual(boxes.length,2,'Settings ROI belongs to editable overlay');
 console.log('PASS: C++/browser protocol, grayscale and palettes, frame-synchronous thin boxes, mirroring, pull pacing, malformed frames, timeout, reconnect and stale-socket isolation');

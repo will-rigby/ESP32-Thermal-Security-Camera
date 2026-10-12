@@ -9,11 +9,22 @@ class ThermalVideo {
     this.image=this.context.createImageData(80,62);
     this.onState=onState;this.onFrame=onFrame;this.running=false;this.socket=null;
     this.timer=0;this.deadline=0;this.retry=0;this.palette=-1;this.lut=null;
+    this.period=50;this.pending=false;
     this.drawRoi=!document.getElementById('roi');
   }
   start() { if(this.running)return;this.running=true;this.connect(); }
+  setRate(fps) {
+    if(![20,10,5,2,1,.5,.2,.1].includes(fps))fps=20;
+    const period=1000/fps;if(period===this.period)return;
+    this.period=period;
+    // Wake a slow pull immediately after a rate change, without overlapping
+    // an outstanding request. Status polling remains independent.
+    if(this.socket && this.socket.readyState===1 && !this.pending) {
+      clearTimeout(this.timer);this.ask(this.socket);
+    }
+  }
   stop() {
-    this.running=false;clearTimeout(this.timer);clearTimeout(this.deadline);clearTimeout(this.retry);
+    this.running=false;this.pending=false;clearTimeout(this.timer);clearTimeout(this.deadline);clearTimeout(this.retry);
     const ws=this.socket;this.socket=null;if(ws)ws.close();
     this.boxes.clearRect(0,0,640,496);
   }
@@ -21,37 +32,40 @@ class ThermalVideo {
     if(!this.running)return;
     this.onState('Connecting video…');this.lastSerial=null;this.frameAt=performance.now();
     const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/stream.yuy2');
-    this.socket=ws;ws.binaryType='arraybuffer';
+    this.socket=ws;this.pending=false;ws.binaryType='arraybuffer';
     this.deadline=setTimeout(()=>this.fail(ws),1500);
     ws.onopen=()=>{if(this.socket!==ws)return;clearTimeout(this.deadline);this.ask(ws)};
     ws.onerror=()=>this.fail(ws);ws.onclose=()=>this.fail(ws);
     ws.onmessage=e=>{
       if(this.socket!==ws)return;
-      clearTimeout(this.deadline);
+      this.pending=false;clearTimeout(this.deadline);clearTimeout(this.timer);
+      let fresh=false;
       try {
         if(!(e.data instanceof ArrayBuffer))throw Error('Invalid video message');
         if(e.data.byteLength) {
           const frame=this.decode(e.data);
           if(frame.serial!==this.lastSerial) {
             this.lastSerial=frame.serial;this.frameAt=performance.now();
+            fresh=true;
             this.draw(frame);this.onFrame(frame);this.onState('');
           }
         }
-        if(performance.now()-this.frameAt>=1500)throw Error('Video stalled');
+        if(performance.now()-this.frameAt>=this.period+1500)throw Error('Video stalled');
         // One request in flight; a slow connection never accumulates frames.
-        this.timer=setTimeout(()=>this.ask(ws),Math.max(1,50-(performance.now()-this.requestAt)));
+        const wait=fresh?this.period:Math.min(this.period,250);
+        this.timer=setTimeout(()=>this.ask(ws),Math.max(1,wait-(performance.now()-this.requestAt)));
       } catch(e) { this.fail(ws); }
     };
   }
   fail(ws) {
     if(this.socket!==ws)return;
-    this.socket=null;clearTimeout(this.timer);clearTimeout(this.deadline);ws.close();
+    this.socket=null;this.pending=false;clearTimeout(this.timer);clearTimeout(this.deadline);ws.close();
     this.boxes.clearRect(0,0,640,496);this.onState('Reconnecting video…');
     if(this.running)this.retry=setTimeout(()=>this.connect(),1000);
   }
   ask(ws) {
-    if(this.socket!==ws || ws.readyState!==1)return;
-    this.requestAt=performance.now();this.deadline=setTimeout(()=>this.fail(ws),1500);
+    if(this.socket!==ws || ws.readyState!==1 || this.pending)return;
+    this.pending=true;this.requestAt=performance.now();this.deadline=setTimeout(()=>this.fail(ws),1500);
     ws.send(new Uint8Array([1]));
   }
   decode(buffer) {

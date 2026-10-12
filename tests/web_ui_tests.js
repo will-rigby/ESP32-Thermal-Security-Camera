@@ -6,7 +6,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     delta_c:3,min_pixels:4,large_min_pixels:16,activate_ms:500,clear_ms:2000,learn_ms:10000,port:1883,
     ssid:'saved-network',broker:'',mqtt_user:'',topic:'thermal/test'};
   const baseline=()=>({frames:10,sensor_ready:true,frame_age_ms:0,video_enabled:true,sensor_error:'none',
-    state:'clear',sensor_warmup_ms:0,video_fps:7.4,min_c:20,max_c:30,
+    state:'clear',sensor_warmup_ms:0,video_fps:7.4,video_target_fps:20,esp32_temperature_c:43.25,min_c:20,max_c:30,
     small:{state:'clear',pixels:0,peak_c:null},large:{state:'clear',pixels:0,peak_c:null},
     wifi_connected:true,mqtt_configured:false,mqtt_connected:false,usb:'ready'});
   async function harness(header){
@@ -18,7 +18,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
       const el={value:'',checked:false,style:{},dataset:{},hidden:false,writes:0,
         getContext:()=>({clearRect(){},strokeRect(...args){rectangles.push(args)}}),
         getBoundingClientRect:()=>({left:0,top:0,width:320,height:248}),setPointerCapture(){},
-        removeAttribute(key){delete this[key]}};
+        setAttribute(key,value){this[key]=value},removeAttribute(key){delete this[key]}};
       let content='';Object.defineProperty(el,'textContent',{get:()=>content,set:v=>{content=v;el.writes++}});
       elements[id]=el;
     }
@@ -31,6 +31,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
       constructor(canvas,overlay,onState){this.running=false;this.onState=onState}
       start(){this.running=true;this.onState('')}
       stop(){this.running=false}
+      setRate(value){this.rate=value}
     }
     const fetch=async(path,options={})=>{
       requests.push({path,options});
@@ -66,6 +67,13 @@ async function testWebUi(settingsHeader,viewerHeader) {
     const state=(channel)=>el[channel+'Panel'].dataset.state;
     assert(state('small')==='clear'&&state('large')==='clear',name+': initial clear states');
     assert(h.api.video.running,name+': video starts');
+    h.status.video_target_fps=.1;await h.next();
+    assert(h.api.video.rate===.1,name+': saved rate reaches active video');
+    if(name==='settings'){
+      assert(el.chipTemperature.textContent==='43.3 °C','Chip temperature formatted');
+      h.status.esp32_temperature_c=null;await h.next();
+      assert(el.chipTemperature.textContent==='Unavailable','Missing temperature clears old value');
+    }
     h.status.small={state:'occupied',pixels:9,peak_c:31.25};h.status.state='occupied';await h.next();
     assert(state('small')==='occupied'&&state('large')==='clear',name+': small only');
     assert(el.smallState.textContent==='Detected'&&el.smallPixels.textContent==='9 pixels'&&el.smallPeak.textContent==='31.3 °C',name+': measurements');
@@ -113,6 +121,14 @@ async function testWebUi(settingsHeader,viewerHeader) {
   const h=await harness(settingsHeader),el=h.elements;
   assert(el.palette.value==='ironbow'&&el.ha_discovery.checked,'Saved palette/discovery loaded');
   assert(el.wifi_password.value===''&&el.mqtt_password.value==='','Passwords not populated');
+  assert(Number(el.videoRate.value)===7,'Old config defaults to 20 FPS');
+  for(const [index,rate] of [.1,.2,.5,1,2,5,10,20].entries()){
+    el.videoRate.value=String(index);el.videoRate.oninput();
+    assert(el.videoRateValue.textContent.startsWith(rate+' FPS'),'Slider label');
+    if(rate<1)assert(el.videoRateValue.textContent.includes((1/rate)+' seconds'),'Fractional rate interval');
+    await el.settings.onsubmit({preventDefault(){}});
+    assert(JSON.parse(h.requests.filter(r=>r.options.method==='PUT').at(-1).options.body).video_target_fps===rate,'Save selected rate');
+  }
   assert(h.rectangles.at(-1)[0]===60*8,'Mirrored ROI overlay');
   const pointer=(x,y)=>({clientX:x,clientY:y,pointerId:1});
   el.roi.onpointerdown(pointer(0,0));el.roi.onpointerup(pointer(320,248));

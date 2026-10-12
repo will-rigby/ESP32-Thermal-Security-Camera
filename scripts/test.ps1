@@ -12,4 +12,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'YUY2 test compilation failed' }
     & '.cache/tests/yuy2_tests.exe' '.cache/tests/gray-frame.yuy2'
     if ($LASTEXITCODE -ne 0) { throw 'YUY2 tests failed' }
+    & $Compiler -std=c++17 -O2 -Wall -Wextra -Werror tests/video_timing_tests.cpp -o .cache/tests/video_timing_tests.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Video timing test compilation failed' }
+    & '.cache/tests/video_timing_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Video timing tests failed' }
 } finally { Pop-Location }

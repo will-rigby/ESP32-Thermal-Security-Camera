@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "VideoTiming.h"
 #include <cmath>
 #include <cstring>
 namespace thermal {
@@ -27,6 +28,7 @@ String configJson(const Config& c, bool secrets) {
   cJSON_AddStringToObject(root, "ssid", c.ssid);
   cJSON_AddStringToObject(root, "broker", c.broker);
   cJSON_AddNumberToObject(root, "port", c.port);
+  cJSON_AddNumberToObject(root, "video_target_fps", 1000.0/c.videoPeriodMs);
   cJSON_AddBoolToObject(root, "flip_horizontal", c.flipHorizontal);
   cJSON_AddStringToObject(root, "palette", paletteName(c.palette));
   cJSON_AddBoolToObject(root, "ha_discovery", c.haDiscovery);
@@ -62,6 +64,11 @@ bool parseConfig(const char* json, Config& c, String& error) {
     textField(root,"mqtt_password",next.mqttPassword,sizeof(next.mqttPassword),error) &&
     textField(root,"topic",next.topic,sizeof(next.topic),error);
   double n = next.port; ok = ok && number(root,"port",n,1,65535,true,error); next.port = uint16_t(n);
+  if(auto rate=cJSON_GetObjectItemCaseSensitive(root,"video_target_fps")) {
+    const uint32_t period=cJSON_IsNumber(rate)?videoPeriodForFps(rate->valuedouble):0;
+    if(!period){ok=false;error="Invalid video_target_fps: use 20, 10, 5, 2, 1, 0.5, 0.2 or 0.1";}
+    else next.videoPeriodMs=period;
+  }
   n = next.detection.deltaC; ok = ok && number(root,"delta_c",n,.2,100,false,error); next.detection.deltaC = n;
   n = next.detection.minPixels; ok = ok && number(root,"min_pixels",n,1,PixelCount,true,error); next.detection.minPixels = uint16_t(n);
   n = next.detection.largeMinPixels; ok = ok && number(root,"large_min_pixels",n,1,PixelCount,true,error); next.detection.largeMinPixels = uint16_t(n);

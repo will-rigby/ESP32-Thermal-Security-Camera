@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$BaseUrl,
     [ValidateRange(1,300)][int]$Seconds=5,
-    [ValidateRange(0.1,20)][double]$MinimumFps=18
+    [ValidateRange(0.01,20)][double]$MinimumFps=18
 )
 $ErrorActionPreference='Stop'
 $uri=[UriBuilder]::new($BaseUrl)
@@ -49,7 +49,10 @@ try {
     }
 } finally { $socket.Abort();$socket.Dispose();$watch.Stop() }
 if($arrivals.Count -lt 2){throw 'Fewer than two fresh frames received'}
-$fps=($arrivals.Count-1)/($arrivals[$arrivals.Count-1]-$arrivals[0])
+# The first reply can be a valid held image from before this connection. Do
+# not count its shortened first interval as newly generated FPS at slow rates.
+$first=if($arrivals.Count -ge 3){1}else{0}
+$fps=($arrivals.Count-1-$first)/($arrivals[$arrivals.Count-1]-$arrivals[$first])
 [pscustomobject]@{Frames=$arrivals.Count;Seconds=[Math]::Round($watch.Elapsed.TotalSeconds,3);MeasuredFPS=[Math]::Round($fps,2);Format='YUY2';Width=80;Height=62;FrameBytes=9920}
 if($fps -lt $MinimumFps -or $arrivals.Count -lt [Math]::Floor($Seconds*$MinimumFps)){throw "Video delivered fewer than $MinimumFps FPS"}
 Write-Output 'PASS: raw WebSocket frames and host arrival rate; physical movement-to-screen latency still needs measurement'

@@ -208,11 +208,13 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"min_internal_heap",heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
   cJSON_AddNumberToObject(root,"largest_internal_block",heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
   const auto video=videoDiagnostics();
+  if(std::isfinite(video.temperatureC))cJSON_AddNumberToObject(root,"esp32_temperature_c",video.temperatureC);
+  else cJSON_AddNullToObject(root,"esp32_temperature_c");
   cJSON_AddNumberToObject(root,"video_fps",video.fps);
   cJSON_AddNumberToObject(root,"video_frames",video.frames);
   cJSON_AddStringToObject(root,"video_format","YUY2");
   cJSON_AddNumberToObject(root,"video_width",VideoWidth);cJSON_AddNumberToObject(root,"video_height",VideoHeight);
-  cJSON_AddNumberToObject(root,"video_target_fps",VideoFps);cJSON_AddNumberToObject(root,"frame_bytes",VideoFrameBytes);
+  cJSON_AddNumberToObject(root,"video_target_fps",1000.0/configStore.get().videoPeriodMs);cJSON_AddNumberToObject(root,"frame_bytes",VideoFrameBytes);
   cJSON_AddNumberToObject(root,"render_ms",video.renderUs/1000.f);cJSON_AddNumberToObject(root,"render_us",video.renderUs);
   cJSON_AddBoolToObject(root,"video_enabled",videoEnabled());
   cJSON_AddBoolToObject(root,"config_loaded",configStore.loaded());
@@ -221,7 +223,7 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"last_failed_alloc_size",lastAllocSize.load());
   cJSON_AddNumberToObject(root,"last_failed_alloc_caps",lastAllocCaps.load());
   addNetworkDiagnostics(root);
-  cJSON_AddStringToObject(root,"firmware","0.3.0"); cJSON_AddStringToObject(root,"arduino","3.3.12");
+  cJSON_AddStringToObject(root,"firmware","0.3.1"); cJSON_AddStringToObject(root,"arduino","3.3.12");
   cJSON_AddStringToObject(root,"idf",esp_get_idf_version());
   cJSON_AddNumberToObject(root,"reset_reason",int(esp_reset_reason()));
   cJSON_AddBoolToObject(root,"mqtt_connected",mqttConnected.load());
