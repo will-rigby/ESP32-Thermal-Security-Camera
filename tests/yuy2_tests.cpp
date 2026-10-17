@@ -43,5 +43,21 @@ int main(int argc,char** argv) {
   assert(get32(bmp.data()+18)==80 && int32_t(get32(bmp.data()+22))==-62 && bmp[28]==8);
   assert(bmp[BmpHeaderBytes]==0 && bmp[BmpHeaderBytes+1]==255);
   if(argc>1) { std::ofstream fixture(argv[1],std::ios::binary);fixture.write(reinterpret_cast<char*>(packet.data()),packet.size());assert(fixture.good()); }
+  // The shared transfer reaches USB, browser and BMP without changing Celsius metadata.
+  ToneMapper mapper;
+  for(int i=0;i<PixelCount;++i)pixels[i]=20.f+float(i%100)/100.f;
+  pixels.back()=50;d.maxC=50;
+  mapper.update(pixels.data(),pixels.size(),d.minC,d.maxC,ToneMapping::Adaptive,d.frameMs);
+  renderVideoPacket(pixels.data(),d,roi,false,Palette::Fire,44,packet.data(),&mapper,ToneMapping::Adaptive);
+  renderVideoPacket(pixels.data(),d,roi,true,Palette::BlackHot,45,other.data(),&mapper,ToneMapping::Adaptive);
+  assert(packet[23]==1 && other[23]==1);
+  temperature=get32(packet.data()+28);memcpy(&decoded,&temperature,4);assert(decoded==50.f);
+  renderBmp(packet.data(),bmp.data());
+  for(int y=0;y<VideoHeight;++y)for(int x=0;x<VideoWidth;++x) {
+    const int i=y*VideoWidth+x,opposite=y*VideoWidth+VideoWidth-1-x;
+    assert(packet[VideoHeaderBytes+i*2+1]==128);
+    assert(std::abs(int(packet[VideoHeaderBytes+i*2])+int(other[VideoHeaderBytes+opposite*2])-251)<=1);
+    assert(bmp[BmpHeaderBytes+i]==uint8_t((int(packet[VideoHeaderBytes+i*2])-16)*255/219));
+  }
   puts("PASS: YUY2 byte order, levels, neutral chroma, flip, black hot, flat scenes, bounds, metadata, BMP and overlay-free pixels");
 }

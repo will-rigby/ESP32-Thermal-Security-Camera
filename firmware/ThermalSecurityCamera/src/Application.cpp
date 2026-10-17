@@ -113,6 +113,7 @@ void acquisitionTask(void*) {
       frame->roi=cfg.detection.roi;
       frame->flipHorizontal=cfg.flipHorizontal;
       frame->palette=cfg.palette;
+      frame->toneMapping=cfg.toneMapping;
       memcpy(frame->mask,detector->mask(),PixelCount);
       frame->serial=++frames; lastValid=now; ++fpsFrames;
       if(now-fpsStart>=1000) { fps=fpsFrames*1000.f/(now-fpsStart); fpsStart=now; fpsFrames=0; }
@@ -128,6 +129,7 @@ void acquisitionTask(void*) {
     currentStatus.roi=cfg.detection.roi; currentStatus.frameSerial=frames;
     currentStatus.flipHorizontal=cfg.flipHorizontal;
     currentStatus.palette=cfg.palette;
+    currentStatus.toneMapping=cfg.toneMapping;
     currentStatus.lastFrameMs=lastValid; currentStatus.sensorReady=healthy;
     currentStatus.sensorErrors=sensor.errors(); currentStatus.fps=healthy?fps:0;
     currentStatus.sensorRecoveries=sensor.recoveries();
@@ -202,6 +204,7 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"sensor_warmup_ms",s.sensorWarmupMs);
   cJSON_AddBoolToObject(root,"flip_horizontal",s.flipHorizontal);
   cJSON_AddStringToObject(root,"palette",paletteName(s.palette));
+  cJSON_AddStringToObject(root,"tone_mapping",toneMappingName(s.toneMapping));
   cJSON_AddNumberToObject(root,"min_c",s.detection.minC); cJSON_AddNumberToObject(root,"max_c",s.detection.maxC);
   cJSON_AddNumberToObject(root,"free_heap",ESP.getFreeHeap()); cJSON_AddNumberToObject(root,"free_psram",ESP.getFreePsram());
   cJSON_AddNumberToObject(root,"free_internal_heap",heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -223,7 +226,7 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"last_failed_alloc_size",lastAllocSize.load());
   cJSON_AddNumberToObject(root,"last_failed_alloc_caps",lastAllocCaps.load());
   addNetworkDiagnostics(root);
-  cJSON_AddStringToObject(root,"firmware","0.3.1"); cJSON_AddStringToObject(root,"arduino","3.3.12");
+  cJSON_AddStringToObject(root,"firmware","0.4.0"); cJSON_AddStringToObject(root,"arduino","3.3.12");
   cJSON_AddStringToObject(root,"idf",esp_get_idf_version());
   cJSON_AddNumberToObject(root,"reset_reason",int(esp_reset_reason()));
   cJSON_AddBoolToObject(root,"mqtt_connected",mqttConnected.load());

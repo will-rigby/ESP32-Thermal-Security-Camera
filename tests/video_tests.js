@@ -25,6 +25,9 @@ const ws=sockets[0];assert.strictEqual(ws.url,'ws://camera.local/stream.yuy2');w
 assert.deepStrictEqual([...ws.sent[0]],[1]);assert.strictEqual(ws.sent.length,1,'Only one initial request');
 ws.receive(packet());
 assert.strictEqual(frames.length,1);assert.strictEqual(frames[0].serial,42);
+assert.strictEqual(frames[0].toneMapping,'linear');
+const adaptive=packet();new Uint8Array(adaptive)[23]=1;
+assert.strictEqual(video.decode(adaptive).toneMapping,'adaptive');
 assert.strictEqual(context.last[0],0);assert.strictEqual(context.last[4],255);
 for(let i=0;i<4960;i++)assert.strictEqual(context.last[i*4+3],255);
 assert.deepStrictEqual(boxes,[[0,0,640,496],[16,24,32,40],[320,80,64,64]],'Native bounds enlarged on overlay');

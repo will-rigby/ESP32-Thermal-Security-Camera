@@ -1,6 +1,7 @@
 #pragma once
 #include "Orientation.h"
 #include "Palette.h"
+#include "ToneMapping.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -19,26 +20,28 @@ inline void putFloat(uint8_t* p,float v) { uint32_t bits;static_assert(sizeof(v)
 inline void putRoi(uint8_t* p,const Roi& r) { put16(p,r.x);put16(p+2,r.y);put16(p+4,r.width);put16(p+6,r.height); }
 // Packed Y0 U Y1 V, limited-range luma (16..235), neutral chroma (128).
 // USB receives only these pixels. All geometry/overlays remain metadata.
-inline void renderYuy2(const float* pixels,float low,float high,bool flip,bool blackHot,uint8_t* out) {
+inline void renderYuy2(const float* pixels,float low,float high,bool flip,bool blackHot,uint8_t* out,const ToneMapper* mapper=nullptr) {
   const float range=std::max(1.f,high-low);
   for(int y=0;y<VideoHeight;++y) for(int x=0;x<VideoWidth;++x) {
     const float c=pixels[y*VideoWidth+orientedColumn(x,flip)];
-    float v=std::isfinite(c)?std::max(0.f,std::min(1.f,(c-low)/range)):0.f;
+    float v=mapper?mapper->map(c):(std::isfinite(c)?std::max(0.f,std::min(1.f,(c-low)/range)):0.f);
     if(blackHot)v=1.f-v;
     const int i=(y*VideoWidth+x)*2;
     out[i]=uint8_t(16.f+v*219.f+0.5f);out[i+1]=128;
   }
 }
-inline void renderVideoPacket(const float* pixels,const Detection& d,const Roi& roi,bool flip,Palette palette,uint32_t serial,uint8_t* packet) {
+inline void renderVideoPacket(const float* pixels,const Detection& d,const Roi& roi,bool flip,Palette palette,uint32_t serial,uint8_t* packet,
+                              const ToneMapper* mapper=nullptr,ToneMapping mapping=ToneMapping::Linear) {
   memset(packet,0,VideoHeaderBytes);memcpy(packet,"YUY2",4);
   put16(packet+4,1);put16(packet+6,VideoHeaderBytes);
   put16(packet+8,VideoWidth);put16(packet+10,VideoHeight);
   put32(packet+12,serial);put32(packet+16,d.frameMs);
   packet[20]=flip?1:0;packet[21]=uint8_t(palette);packet[22]=uint8_t(d.state);
+  packet[23]=uint8_t(mapping);
   putFloat(packet+24,d.minC);putFloat(packet+28,d.maxC);putRoi(packet+32,roi);
   putRoi(packet+40,d.small.bounds);putRoi(packet+48,d.large.bounds);
   put16(packet+56,d.small.pixels);put16(packet+58,d.large.pixels);
-  renderYuy2(pixels,d.minC,d.maxC,flip,palette==Palette::BlackHot,packet+VideoHeaderBytes);
+  renderYuy2(pixels,d.minC,d.maxC,flip,palette==Palette::BlackHot,packet+VideoHeaderBytes,mapper);
 }
 // Uncompressed, top-down 8-bit grayscale BMP; no image encoder is involved.
 inline void renderBmp(const uint8_t* packet,uint8_t* out) {

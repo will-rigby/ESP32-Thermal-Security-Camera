@@ -10,6 +10,7 @@ struct Frame {
   uint32_t serial = 0;
   bool flipHorizontal = false;
   Palette palette = Palette::WhiteHot;
+  ToneMapping toneMapping = ToneMapping::Adaptive;
 };
 struct Status {
   Detection detection;
@@ -22,6 +23,7 @@ struct Status {
   bool sensorReady = false;
   bool flipHorizontal = false;
   Palette palette = Palette::WhiteHot;
+  ToneMapping toneMapping = ToneMapping::Adaptive;
   char sensorError[96] = "starting";
 };
 extern ConfigStore configStore;

@@ -31,6 +31,7 @@ String configJson(const Config& c, bool secrets) {
   cJSON_AddNumberToObject(root, "video_target_fps", 1000.0/c.videoPeriodMs);
   cJSON_AddBoolToObject(root, "flip_horizontal", c.flipHorizontal);
   cJSON_AddStringToObject(root, "palette", paletteName(c.palette));
+  cJSON_AddStringToObject(root, "tone_mapping", toneMappingName(c.toneMapping));
   cJSON_AddBoolToObject(root, "ha_discovery", c.haDiscovery);
   cJSON_AddStringToObject(root, "mqtt_user", c.mqttUser);
   cJSON_AddStringToObject(root, "topic", c.topic);
@@ -82,6 +83,11 @@ bool parseConfig(const char* json, Config& c, String& error) {
   if(auto palette=cJSON_GetObjectItemCaseSensitive(root,"palette")) {
     if(!cJSON_IsString(palette) || !parsePalette(palette->valuestring,next.palette)) {
       ok=false;error="Invalid palette: use fire, ironbow, rainbow, white_hot or black_hot";
+    }
+  }
+  if(auto mapping=cJSON_GetObjectItemCaseSensitive(root,"tone_mapping")) {
+    if(!cJSON_IsString(mapping) || !parseToneMapping(mapping->valuestring,next.toneMapping)) {
+      ok=false;error="Invalid tone_mapping: use adaptive or linear";
     }
   }
   if(auto discovery=cJSON_GetObjectItemCaseSensitive(root,"ha_discovery")) {

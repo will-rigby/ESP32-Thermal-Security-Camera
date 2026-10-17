@@ -5,6 +5,7 @@
 #include <cJSON.h>
 #include "Detector.h"
 #include "Palette.h"
+#include "ToneMapping.h"
 namespace thermal {
 struct Config {
   char ssid[33]{}, wifiPassword[65]{};
@@ -13,6 +14,7 @@ struct Config {
   uint32_t videoPeriodMs = 50;
   bool flipHorizontal = false;
   Palette palette = Palette::WhiteHot;
+  ToneMapping toneMapping = ToneMapping::Adaptive;
   bool haDiscovery = true;
   DetectionSettings detection;
   uint32_t revision = 1;

@@ -77,6 +77,7 @@ class ThermalVideo {
     const rect=offset=>{const r={x:v.getUint16(offset,true),y:v.getUint16(offset+2,true),width:v.getUint16(offset+4,true),height:v.getUint16(offset+6,true)};
       if(r.x+r.width>80 || r.y+r.height>62)throw Error('Invalid bounds');return r};
     return {bytes,serial:v.getUint32(12,true),frameMs:v.getUint32(16,true),flip:!!bytes[20],palette:bytes[21],
+      toneMapping:bytes[23]===1?'adaptive':'linear',
       roi:rect(32),small:rect(40),large:rect(48),smallPixels:v.getUint16(56,true),largePixels:v.getUint16(58,true)};
   }
   makeLut(palette) {

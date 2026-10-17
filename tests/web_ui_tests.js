@@ -120,6 +120,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
   }
   const h=await harness(settingsHeader),el=h.elements;
   assert(el.palette.value==='ironbow'&&el.ha_discovery.checked,'Saved palette/discovery loaded');
+  assert(el.tone_mapping.value==='adaptive','Old config defaults to Adaptive detail');
   assert(el.wifi_password.value===''&&el.mqtt_password.value==='','Passwords not populated');
   assert(Number(el.videoRate.value)===7,'Old config defaults to 20 FPS');
   for(const [index,rate] of [.1,.2,.5,1,2,5,10,20].entries()){
@@ -133,9 +134,11 @@ async function testWebUi(settingsHeader,viewerHeader) {
   const pointer=(x,y)=>({clientX:x,clientY:y,pointerId:1});
   el.roi.onpointerdown(pointer(0,0));el.roi.onpointerup(pointer(320,248));
   el.palette.value='black_hot';el.large_min_pixels.value='24';el.ha_discovery.checked=false;
+  el.tone_mapping.value='linear';
   await el.settings.onsubmit({preventDefault(){}});
   let body=JSON.parse(h.requests.filter(r=>r.options.method==='PUT').at(-1).options.body);
   assert(body.palette==='black_hot'&&body.large_min_pixels===24&&body.ha_discovery===false,'Settings fields saved');
+  assert(body.tone_mapping==='linear','Contrast mode saved independently of palette');
   assert(body.roi.x===0&&body.roi.width===80&&body.roi.height===62,'Flipped full-image ROI mapping');
   assert(!('wifi_password'in body)&&!('mqtt_password'in body),'Blank passwords omitted');
   el.clearWifiPassword.checked=true;await el.settings.onsubmit({preventDefault(){}});

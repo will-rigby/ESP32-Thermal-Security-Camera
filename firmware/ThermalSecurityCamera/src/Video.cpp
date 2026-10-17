@@ -8,6 +8,8 @@ namespace {
 SemaphoreHandle_t videoMutex;
 uint8_t *latest,*rendered;
 Frame* renderFrame;
+// Single owner: the video task. Keep LUT workspace off its 4 KB stack.
+ToneMapper toneMapper;
 uint32_t latestSerial=0,latestFrameMs=0;
 uint32_t cachedPeriod=50,temperatureMs=0;
 bool valid=false;
@@ -42,12 +44,15 @@ void videoTask(void*) {
     const auto health=getStatus();
     if(!enabled.load() || !health.sensorReady || uint32_t(millis()-health.lastFrameMs)>1000) {
       xSemaphoreTake(videoMutex,portMAX_DELAY);valid=false;diagnostics.fps=0;xSemaphoreGive(videoMutex);
-      timing.reset();last=0;
+      timing.reset();last=0;toneMapper.reset();
     } else if(timing.due(cycleMs) && copyFrame(*renderFrame,last) && renderFrame->detection.state!=Occupancy::Unavailable &&
               uint32_t(millis()-renderFrame->detection.frameMs)<=1000) {
       const uint32_t renderStart=micros();
+      toneMapper.update(renderFrame->pixels,PixelCount,renderFrame->detection.minC,renderFrame->detection.maxC,
+                        renderFrame->toneMapping,renderFrame->detection.frameMs);
       renderVideoPacket(renderFrame->pixels,renderFrame->detection,renderFrame->roi,
-                        renderFrame->flipHorizontal,renderFrame->palette,renderFrame->serial,rendered);
+                        renderFrame->flipHorizontal,renderFrame->palette,renderFrame->serial,rendered,
+                        &toneMapper,renderFrame->toneMapping);
       last=renderFrame->serial;
       const uint32_t elapsed=micros()-renderStart;
       xSemaphoreTake(videoMutex,portMAX_DELAY);

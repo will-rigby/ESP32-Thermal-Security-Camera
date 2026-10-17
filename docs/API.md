@@ -62,7 +62,11 @@ Firmware 0.1.2 adds `sensor_warmup_ms`, the remaining startup hold time. While p
 
 WebSocket requests receive an empty binary message when no new healthy frame is available. Browser pulls follow the selected interval, retrying empty responses within 250 ms. Reply timeouts remain 1.5 seconds; lack-of-progress detection allows the selected interval plus 1.5 seconds. Status polling independently checks sensor/pause availability and connection loss. Cached images expire after the selected interval plus one second, but sensor health must always be current within one second. A failed sensor does not keep serving old snapshots or USB repeats. A USB host may freeze its last frame; check `/api/status` or MQTT rather than inferring health from the displayed USB picture.
 
-## YUY2 video protocol (0.3.0)
+Firmware 0.4.0 adds string `tone_mapping` to GET/PUT configuration and status. Accepted values are `adaptive` (default for new and upgraded configurations) and `linear` (previous min/max mapping). An omitted field preserves the current selection; any other value or type is rejected without saving. The selection is persisted in NVS. As with other settings, saving pauses capture briefly and restarts background learning.
+
+Adaptive detail uses a global contrast-limited histogram with a linear blend, noise limiting and time-based smoothing. It is applied once before producing the shared USB/browser/BMP image. All palettes work with either mode. Actual Celsius values, detector thresholds, ROI and MQTT measurements are unaffected. Video pixels are display intensities: neither nonlinear pixels nor their palette colours should be converted back to Celsius using the reported min/max. See [research and implementation details](THERMAL_CONTRAST.md).
+
+## YUY2 video protocol (0.3.0; contrast metadata added in 0.4.0)
 
 USB advertises one uncompressed YUY2 format: 80 x 62, 16 bits/pixel, 20 FPS (500,000 units of 100 ns), 9,920 bytes per image. Pixels are row-major packed `Y0 U Y1 V`; Y is limited range 16–235 and U/V are always 128. White hot is used unless the saved palette is Black hot. Flip is already applied to pixels. No metadata, bounding boxes, borders or state stripes are included in the USB image.
 
@@ -78,7 +82,8 @@ The response has a 64-byte header followed by the same 9,920 image bytes used by
 | 12, 16 | uint32 each | Sensor frame serial; capture uptime in milliseconds (wraps) |
 | 20 | uint8 | Bit 0: horizontally flipped |
 | 21 | uint8 | Palette: Fire 0, Ironbow 1, Rainbow 2, White hot 3, Black hot 4 |
-| 22, 23 | uint8 each | State: unavailable 0, learning 1, clear 2, occupied 3; reserved |
+| 22 | uint8 | State: unavailable 0, learning 1, clear 2, occupied 3 |
+| 23 | uint8 | Tone mapping: Linear 0, Adaptive detail 1 (was reserved/zero before 0.4.0) |
 | 24, 28 | float32 each | Frame minimum and maximum Celsius |
 | 32, 40, 48 | four uint16 each | ROI, small bounds, large bounds: x, y, width, height |
 | 56, 58 | uint16 each | Current small and large region pixel counts |

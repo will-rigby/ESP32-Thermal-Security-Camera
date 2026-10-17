@@ -16,4 +16,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Video timing test compilation failed' }
     & '.cache/tests/video_timing_tests.exe'
     if ($LASTEXITCODE -ne 0) { throw 'Video timing tests failed' }
+    & $Compiler -std=c++17 -O2 -Wall -Wextra -Werror tests/tone_mapping_tests.cpp -o .cache/tests/tone_mapping_tests.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Tone mapping test compilation failed' }
+    & '.cache/tests/tone_mapping_tests.exe'
+    if ($LASTEXITCODE -ne 0) { throw 'Tone mapping tests failed' }
 } finally { Pop-Location }
