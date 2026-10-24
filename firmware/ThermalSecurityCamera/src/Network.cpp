@@ -31,13 +31,13 @@ void networkTask(void*) {
   networkRunning=true;
   Config cfg=configStore.get(); uint32_t revision=0,retry=0;
   WifiRecovery recovery;
-  uint32_t publishedSequence[3]{},lastState[3]{};
-  Occupancy publishedState[3]={Occupancy::Unavailable,Occupancy::Unavailable,Occupancy::Unavailable};
-  unsigned discoveryIndex=3;
+  uint32_t publishedSequence[4]{},lastState[4]{};
+  uint8_t publishedState[4]{};
+  unsigned discoveryIndex=4;
   bool refreshState=false,subscribed=false;
   bool ap=false, announced=false, mdns=false;
   esp_mqtt_client_handle_t client=nullptr;
-  EventCursor events[3];
+  EventCursor events[4];
   String base,availability;
   for(;;) {
     const uint32_t now=millis(); Config next=configStore.get();
@@ -106,14 +106,17 @@ void networkTask(void*) {
       if(!subscribed) subscribed=esp_mqtt_client_subscribe(client,"homeassistant/status",1)>=0;
       if(!announced) {
         bool sent=true;
-        for(unsigned i=0;i<3;++i) {
-          const auto objectClass=ObjectClass(i);
+        for(unsigned i=0;i<4;++i) {
+          const bool fire=i==3;
+          const auto objectClass=fire?ObjectClass::Any:ObjectClass(i);
           const auto& d=classDetection(s.detection,objectClass);
-          events[i].connect(d.sequence);
-          const String path=base+(i?String("/")+className(objectClass):String(""));
-          const String payload=detectionJson(s,false,objectClass);
+          const uint32_t sequence=fire?s.fire.sequence:d.sequence;
+          const uint8_t state=fire?uint8_t(s.fire.state):uint8_t(d.state);
+          events[i].connect(sequence);
+          const String path=base+(fire?String("/fire"):i?String("/")+className(objectClass):String(""));
+          const String payload=fire?fireJson(s,false):detectionJson(s,false,objectClass);
           if(esp_mqtt_client_publish(client,(path+"/state").c_str(),payload.c_str(),payload.length(),1,true)<0) sent=false;
-          else { lastState[i]=now;publishedSequence[i]=d.sequence;publishedState[i]=d.state; }
+          else { lastState[i]=now;publishedSequence[i]=sequence;publishedState[i]=state; }
         }
         if(sent && esp_mqtt_client_publish(client,availability.c_str(),"online",0,1,true)>=0) {
           announced=true; mqttConnected=true;discoveryIndex=0;
@@ -123,27 +126,32 @@ void networkTask(void*) {
         // Sequence identifies an actual edge even if the one-frame transition
         // flag has cleared before the network task gets scheduled.
         bool refreshed=true;
-        for(unsigned i=0;i<3;++i) {
-          const auto objectClass=ObjectClass(i);const auto& d=classDetection(s.detection,objectClass);
-          const String path=base+(i?String("/")+className(objectClass):String(""));
-          const bool edge=d.state==Occupancy::Clear || d.state==Occupancy::Occupied;
-          if(events[i].consume(d.sequence,edge,d.eventMs,now)) {
-            const String payload=detectionJson(s,true,objectClass);
+        for(unsigned i=0;i<4;++i) {
+          const bool fire=i==3;
+          const auto objectClass=fire?ObjectClass::Any:ObjectClass(i);const auto& d=classDetection(s.detection,objectClass);
+          const String path=base+(fire?String("/fire"):i?String("/")+className(objectClass):String(""));
+          const uint32_t sequence=fire?s.fire.sequence:d.sequence;
+          const uint8_t state=fire?uint8_t(s.fire.state):uint8_t(d.state);
+          const bool edge=fire?s.fire.eventValid:(d.state==Occupancy::Clear || d.state==Occupancy::Occupied);
+          if(events[i].consume(sequence,edge,fire?s.fire.eventMs:d.eventMs,now)) {
+            const String payload=fire?fireJson(s,true):detectionJson(s,true,objectClass);
             esp_mqtt_client_publish(client,(path+"/event").c_str(),payload.c_str(),payload.length(),1,false);
           }
-          if(refreshState || d.state!=publishedState[i] || d.sequence!=publishedSequence[i] || now-lastState[i]>=30000) {
-            const String payload=detectionJson(s,false,objectClass);
+          if(refreshState || state!=publishedState[i] || sequence!=publishedSequence[i] || now-lastState[i]>=30000) {
+            const String payload=fire?fireJson(s,false):detectionJson(s,false,objectClass);
             if(esp_mqtt_client_publish(client,(path+"/state").c_str(),payload.c_str(),payload.length(),1,true)>=0) {
-              lastState[i]=now; publishedState[i]=d.state; publishedSequence[i]=d.sequence;
+              lastState[i]=now; publishedState[i]=state; publishedSequence[i]=sequence;
             } else refreshed=false;
           }
         }
         if(refreshed) refreshState=false;
         // Stagger discovery to fit the bounded QoS outbox and scarce RAM.
-        if(discoveryIndex<3 && esp_mqtt_client_get_outbox_size(client)<1024) {
-          const auto objectClass=ObjectClass(discoveryIndex);
-          const String payload=discoveryJson(cfg,deviceId,objectClass);
-          if(payload!="{}" && esp_mqtt_client_publish(client,discoveryTopic(deviceId,objectClass).c_str(),payload.c_str(),payload.length(),1,true)>=0) ++discoveryIndex;
+        if(discoveryIndex<4 && esp_mqtt_client_get_outbox_size(client)<1024) {
+          const bool fire=discoveryIndex==3;
+          const auto objectClass=fire?ObjectClass::Any:ObjectClass(discoveryIndex);
+          const String payload=fire?fireDiscoveryJson(cfg,deviceId):discoveryJson(cfg,deviceId,objectClass);
+          const String topic=fire?fireDiscoveryTopic(deviceId):discoveryTopic(deviceId,objectClass);
+          if(payload!="{}" && esp_mqtt_client_publish(client,topic.c_str(),payload.c_str(),payload.length(),1,true)>=0) ++discoveryIndex;
         }
       }
     }

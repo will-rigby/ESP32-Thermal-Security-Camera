@@ -29,11 +29,12 @@ void dispatch() {
   else if(command=="CONFIG") reply(thermal::configStore.json()); // Always redacted.
   else if(command=="DISCOVERY") {
     cJSON* items=cJSON_CreateArray();const auto config=thermal::configStore.get();
-    for(unsigned i=0;i<3;++i) {
-      const auto objectClass=thermal::ObjectClass(i);
+    for(unsigned i=0;i<4;++i) {
+      const bool fire=i==3;
+        const auto objectClass=fire?thermal::ObjectClass::Any:thermal::ObjectClass(i);
       cJSON* item=cJSON_CreateObject();cJSON_AddItemToArray(items,item);
-      cJSON_AddStringToObject(item,"topic",thermal::discoveryTopic(thermal::deviceId,objectClass).c_str());
-      const String payload=thermal::discoveryJson(config,thermal::deviceId,objectClass);
+      cJSON_AddStringToObject(item,"topic",(fire?thermal::fireDiscoveryTopic(thermal::deviceId):thermal::discoveryTopic(thermal::deviceId,objectClass)).c_str());
+      const String payload=fire?thermal::fireDiscoveryJson(config,thermal::deviceId):thermal::discoveryJson(config,thermal::deviceId,objectClass);
       cJSON_AddItemToObject(item,"payload",payload.length()?cJSON_Parse(payload.c_str()):cJSON_CreateString(""));
     }
     char* text=cJSON_PrintUnformatted(items);reply(text?text:"[]");cJSON_free(text);cJSON_Delete(items);

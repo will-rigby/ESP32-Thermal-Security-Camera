@@ -3,19 +3,19 @@ namespace thermal {
 String discoveryTopic(const char* id,ObjectClass objectClass) {
   return String("homeassistant/binary_sensor/thermal_")+id+"/"+className(objectClass)+"/config";
 }
-String discoveryJson(const Config& cfg,const char* id,ObjectClass objectClass) {
+static String channelDiscoveryJson(const Config& cfg,const char* id,ObjectClass objectClass,bool fire) {
   if(!cfg.haDiscovery) return ""; // Retained tombstone removes an existing entity.
   cJSON* root=cJSON_CreateObject();
   if(!root) return "{}";
   const String base=cfg.topic;
-  const String state=base+(objectClass==ObjectClass::Any?String(""):String("/")+className(objectClass))+"/state";
-  const String unique=String("thermal_")+id+"_"+className(objectClass);
+  const String state=base+(fire?String("/fire"):objectClass==ObjectClass::Any?String(""):String("/")+className(objectClass))+"/state";
+  const String unique=String("thermal_")+id+"_"+(fire?"fire":className(objectClass));
   cJSON_AddStringToObject(root,"unique_id",unique.c_str());
-  cJSON_AddStringToObject(root,"name",objectClass==ObjectClass::Any?"Occupancy":objectClass==ObjectClass::Small?"Small objects":"Large objects");
-  cJSON_AddStringToObject(root,"device_class","occupancy");
+  cJSON_AddStringToObject(root,"name",fire?"Fire detection":objectClass==ObjectClass::Any?"Occupancy":objectClass==ObjectClass::Small?"Small objects":"Large objects");
+  cJSON_AddStringToObject(root,"device_class",fire?"heat":"occupancy");
   cJSON_AddStringToObject(root,"state_topic",state.c_str());
   cJSON_AddStringToObject(root,"value_template","{{ value_json.state }}");
-  cJSON_AddStringToObject(root,"payload_on","occupied");
+  cJSON_AddStringToObject(root,"payload_on",fire?"detected":"occupied");
   cJSON_AddStringToObject(root,"payload_off","clear");
   cJSON_AddNumberToObject(root,"qos",1);
   cJSON_AddStringToObject(root,"availability_mode","all");
@@ -24,16 +24,25 @@ String discoveryJson(const Config& cfg,const char* id,ObjectClass objectClass) {
   cJSON_AddStringToObject(deviceOnline,"topic",(base+"/availability").c_str());
   cJSON* valid=cJSON_CreateObject();cJSON_AddItemToArray(available,valid);
   cJSON_AddStringToObject(valid,"topic",state.c_str());
-  cJSON_AddStringToObject(valid,"value_template","{{ 'online' if value_json.state in ['occupied', 'clear'] else 'offline' }}");
+  cJSON_AddStringToObject(valid,"value_template",fire?"{{ 'online' if value_json.state in ['detected', 'clear'] else 'offline' }}":"{{ 'online' if value_json.state in ['occupied', 'clear'] else 'offline' }}");
   cJSON* device=cJSON_AddObjectToObject(root,"device");
   cJSON* identifiers=cJSON_AddArrayToObject(device,"identifiers");
   cJSON_AddItemToArray(identifiers,cJSON_CreateString((String("thermal_")+id).c_str()));
   cJSON_AddStringToObject(device,"name",(String("Thermal camera ")+id).c_str());
   cJSON_AddStringToObject(device,"manufacturer","Waveshare");
   cJSON_AddStringToObject(device,"model","Thermal-45-Camera ESP32-S3");
-  cJSON_AddStringToObject(device,"sw_version","0.4.0");
+  cJSON_AddStringToObject(device,"sw_version","0.5.0");
   cJSON_AddStringToObject(device,"configuration_url",(String("http://thermal-")+id+".local/settings").c_str());
   char* encoded=cJSON_PrintUnformatted(root);String result=encoded?encoded:"{}";
   cJSON_free(encoded);cJSON_Delete(root);return result;
+}
+String discoveryJson(const Config& cfg,const char* id,ObjectClass objectClass) {
+  return channelDiscoveryJson(cfg,id,objectClass,false);
+}
+String fireDiscoveryTopic(const char* id) {
+  return String("homeassistant/binary_sensor/thermal_")+id+"/fire/config";
+}
+String fireDiscoveryJson(const Config& cfg,const char* id) {
+  return channelDiscoveryJson(cfg,id,ObjectClass::Any,true);
 }
 }

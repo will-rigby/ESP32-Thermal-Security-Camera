@@ -33,6 +33,10 @@ String configJson(const Config& c, bool secrets) {
   cJSON_AddStringToObject(root, "palette", paletteName(c.palette));
   cJSON_AddStringToObject(root, "tone_mapping", toneMappingName(c.toneMapping));
   cJSON_AddBoolToObject(root, "ha_discovery", c.haDiscovery);
+  cJSON_AddBoolToObject(root, "fire_enabled", c.fire.enabled);
+  cJSON_AddNumberToObject(root, "fire_threshold_c", c.fire.thresholdC);
+  cJSON_AddNumberToObject(root, "fire_activate_ms", c.fire.activateMs);
+  cJSON_AddNumberToObject(root, "fire_clear_ms", c.fire.clearMs);
   cJSON_AddStringToObject(root, "mqtt_user", c.mqttUser);
   cJSON_AddStringToObject(root, "topic", c.topic);
   if (secrets) {
@@ -76,6 +80,13 @@ bool parseConfig(const char* json, Config& c, String& error) {
   n = next.detection.activateMs; ok = ok && number(root,"activate_ms",n,0,60000,true,error); next.detection.activateMs = uint32_t(n);
   n = next.detection.clearMs; ok = ok && number(root,"clear_ms",n,0,60000,true,error); next.detection.clearMs = uint32_t(n);
   n = next.detection.learnMs; ok = ok && number(root,"learn_ms",n,1000,120000,true,error); next.detection.learnMs = uint32_t(n);
+  n = next.fire.thresholdC; ok = ok && number(root,"fire_threshold_c",n,0,1000,false,error); next.fire.thresholdC = n;
+  n = next.fire.activateMs; ok = ok && number(root,"fire_activate_ms",n,1,600000,true,error); next.fire.activateMs = uint32_t(n);
+  n = next.fire.clearMs; ok = ok && number(root,"fire_clear_ms",n,0,600000,true,error); next.fire.clearMs = uint32_t(n);
+  if(auto enabled=cJSON_GetObjectItemCaseSensitive(root,"fire_enabled")) {
+    if(!cJSON_IsBool(enabled)) { ok=false;error="Invalid fire_enabled: expected boolean"; }
+    else next.fire.enabled=cJSON_IsTrue(enabled);
+  }
   if(auto flip=cJSON_GetObjectItemCaseSensitive(root,"flip_horizontal")) {
     if(!cJSON_IsBool(flip)) { ok=false; error="Invalid flip_horizontal: expected boolean"; }
     else next.flipHorizontal=cJSON_IsTrue(flip);

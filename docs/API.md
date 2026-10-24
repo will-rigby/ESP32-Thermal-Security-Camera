@@ -1,6 +1,6 @@
 # HTTP and MQTT interface, version 1
 
-All temperatures are degrees C. Coordinates are integer native sensor pixels, origin top-left: x 0â€“79, y 0â€“61. ROI extents are exclusive on the right and bottom (`x + width <= 80`, `y + height <= 62`). Detection is based on temperature difference, independent of the display palette.
+All temperatures are degrees C. Coordinates are integer native sensor pixels, origin top-left: x 0â€“79, y 0â€“61. ROI extents are exclusive on the right and bottom (`x + width <= 80`, `y + height <= 62`). Occupancy detection is based on temperature difference; fire detection uses absolute temperature across the whole image. Both are independent of the display palette.
 
 ## HTTP
 
@@ -66,6 +66,33 @@ Firmware 0.4.0 adds string `tone_mapping` to GET/PUT configuration and status. A
 
 Adaptive detail uses a global contrast-limited histogram with a linear blend, noise limiting and time-based smoothing. It is applied once before producing the shared USB/browser/BMP image. All palettes work with either mode. Actual Celsius values, detector thresholds, ROI and MQTT measurements are unaffected. Video pixels are display intensities: neither nonlinear pixels nor their palette colours should be converted back to Celsius using the reported min/max. See [research and implementation details](THERMAL_CONTRAST.md).
 
+### Fire detection (0.5.0)
+
+These additive GET/PUT configuration fields are also accepted by USB `SET`. Old saved configurations use the defaults; omitted fields preserve current values. Invalid values reject the entire update without saving.
+
+| Field | Default | Allowed values |
+| --- | --- | --- |
+| `fire_enabled` | `false` | JSON boolean |
+| `fire_threshold_c` | `80` | Finite number, 0–1000°C |
+| `fire_activate_ms` | `10000` | Integer, 1–600000 ms |
+| `fire_clear_ms` | `5000` | Integer, 0–600000 ms |
+
+The hottest native pixel anywhere in the image must remain **strictly above** the threshold for the activation delay. A reading at/below the threshold resets pending activation. Once detected, temperatures must stay at/below the threshold for the clear delay; renewed heat resets pending clearing. The hottest pixel may move; it need not remain at one location. Occupancy ROI, minimum pixel counts, background learning, palettes and video refresh settings do not affect fire detection.
+
+Disabled monitoring reports `disabled`. Startup/recovery warm-up, invalid frames, capture pauses, sensor recovery and frame gaps over one second report `unavailable`, reset timing and invalidate pending events without creating a clear event. Monitoring begins after the existing two-minute sensor warm-up, without waiting for occupancy learning. A valid recovered frame initializes `clear` without an event; sustained heat must qualify again. A configuration save interrupts monitoring through the normal capture pause; occupancy relearning alone does not reset fire monitoring.
+
+`GET /api/status` and USB `STATUS` add a `fire` object using the following state payload. `<prefix>/fire/state` publishes it retained at QoS 1:
+
+```json
+{"version":1,"device_id":"aabbccddeeff","state":"detected","uptime_ms":135000,"peak_c":91.5,"threshold_c":80,"activate_ms":10000,"clear_ms":5000}
+```
+
+States are `disabled`, `unavailable`, `clear` and `detected`. `peak_c` is the current whole-image peak, or `null` when disabled/unavailable. `uptime_ms` is the sample/invalidation time. Settings in the payload belong to that detection snapshot.
+
+`<prefix>/fire/event` publishes only `detected`/`clear` transitions, non-retained at QoS 1, with the same fields plus `transition` and `event_id`, e.g. `aabbccddeeff-12345678-1-fire`. Event `uptime_ms` is the transition time; peak temperature is the latest available sample when published, not a stored historical frame. De-duplicate event IDs. Current state is published on reconnect, transitions and every 30 seconds, and refreshed on Home Assistant birth. Offline or obsolete events are discarded, matching occupancy reporting; this is not a durable event log.
+
+Home Assistant adds **Fire detection**, unique ID `thermal_<id>_fire`, discovery topic `homeassistant/binary_sensor/thermal_<id>/fire/config`, grouped under the existing device. It uses `device_class: heat`, with `detected` on and `clear` off. Both device availability and a valid fire state are required: disabled/warming/faulted monitoring appears unavailable. Discovery remains present while fire monitoring is disabled; turning `ha_discovery` off sends its retained tombstone alongside the occupancy entities.
+
 ## YUY2 video protocol (0.3.0; contrast metadata added in 0.4.0)
 
 USB advertises one uncompressed YUY2 format: 80 x 62, 16 bits/pixel, 20 FPS (500,000 units of 100 ns), 9,920 bytes per image. Pixels are row-major packed `Y0 U Y1 V`; Y is limited range 16â€“235 and U/V are always 128. White hot is used unless the saved palette is Black hot. Flip is already applied to pixels. No metadata, bounding boxes, borders or state stripes are included in the USB image.
@@ -114,7 +141,7 @@ Non-retained `/event` example:
 
 From 0.2.0, the existing `/state` and `/event` remain aggregate occupancy. `/small/state`, `/large/state`, `/small/event` and `/large/event` use the same envelope with `object_class` set to `small` or `large` (`any` for aggregate). States are retained; events are not. Each channel has its own sequence and event IDs include a class suffix to prevent collisions. Treat IDs as opaque. For class payloads, peak temperature follows the class-specific rules above rather than the entire ROI. All channels share `/availability` and independently discard obsolete/offline transitions on reconnect.
 
-Home Assistant discovery publishes three retained QoS-1 binary sensor configs at `homeassistant/binary_sensor/thermal_<id>/<any|small|large>/config`, grouped by `device.identifiers=["thermal_<id>"]`. Each entity requires both device availability and a valid (`clear`/`occupied`) channel state; warm-up, learning and sensor failure appear unavailable. Configs/state are republished on MQTT reconnection and the standard `homeassistant/status` online birth message, without resetting live event cursors. Discovery is staggered to fit the 4096-byte outbox. Turning `ha_discovery` off sends empty retained payloads to the same discovery topics at the next broker connection; keep the broker configured until cleanup occurs. The prefix/birth topic are fixed to Home Assistant defaults in this release. See [official discovery documentation](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery).
+Home Assistant occupancy discovery publishes three retained QoS-1 binary sensor configs at `homeassistant/binary_sensor/thermal_<id>/<any|small|large>/config`, grouped by `device.identifiers=["thermal_<id>"]`. Each entity requires both device availability and a valid (`clear`/`occupied`) channel state; warm-up, learning and sensor failure appear unavailable. Configs/state are republished on MQTT reconnection and the standard `homeassistant/status` online birth message, without resetting live event cursors. Discovery is staggered to fit the 4096-byte outbox. Turning `ha_discovery` off sends empty retained payloads to the same discovery topics at the next broker connection; keep the broker configured until cleanup occurs. The prefix/birth topic are fixed to Home Assistant defaults in this release. See [official discovery documentation](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery).
 
 The retained state publishes on connect, state changes and at least every 30 seconds while connected. Initial learning completion publishes clear state without a synthetic exit event. Sensor failure/relearning publish state changes without occupied/clear events. A new connection baselines the event sequence, discards the previous client's retransmission outbox, and publishes only current state. Delayed unconsumed transitions older than one second are dropped. A message already accepted by the broker cannot be retracted. MQTT is not a durable event history, and network outages do not stop detection.
 
@@ -134,7 +161,7 @@ The USB composite device provides UVC video and CDC serial using one TinyUSB sta
 | --- | --- |
 | `STATUS` | Same health JSON as HTTP |
 | `CONFIG` | Saved configuration with passwords redacted |
-| `DISCOVERY` | Read-only array of the three generated discovery topics/payloads; empty payloads when discovery is disabled |
+| `DISCOVERY` | Read-only array of the four generated discovery topics/payloads (occupancy, small, large, fire); empty payloads when discovery is disabled |
 | `SET {json}` | Same partial settings validation/persistence as HTTP PUT |
 | `VIDEO OFF` / `VIDEO ON` | Temporarily stop/start YUY2 output to USB/browser/snapshots; acquisition/detection continue |
 | `SENSOR RECOVER` | Reset capture on the acquisition task, preserving calibration and allocated buffers. Restarts the conservative 120-second detection settling hold. Does not reboot the ESP32 or erase settings. Use `REBOOT` if initial sensor startup failed or the fault persists. |

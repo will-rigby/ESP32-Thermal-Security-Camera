@@ -48,16 +48,19 @@ try {
     }
     Save-Config @{palette='ironbow';large_min_pixels=24;ha_discovery=$true}
     $messages=(& "$PSScriptRoot/usb-command.ps1" -Port $Port -Command DISCOVERY -TimeoutSec 10) | ConvertFrom-Json
-    Require ($messages.Count -eq 3) 'Expected three discovered occupancy sensors'
+    Require ($messages.Count -eq 4) 'Expected three occupancy sensors and one fire sensor'
     foreach($message in $messages) {
         $p=$message.payload
         Require ($message.topic -like 'homeassistant/binary_sensor/thermal_*/config') 'Invalid discovery topic'
-        Require ($p.device_class -eq 'occupancy' -and $p.qos -eq 1) 'Invalid discovery sensor type/QoS'
+        $fire=$message.topic -like '*/fire/config'
+        $deviceClass=if($fire){'heat'}else{'occupancy'}
+        $on=if($fire){'detected'}else{'occupied'}
+        Require ($p.device_class -eq $deviceClass -and $p.qos -eq 1) 'Invalid discovery sensor type/QoS'
         Require ($p.availability_mode -eq 'all' -and $p.availability.Count -eq 2) 'Learning/fault availability missing'
-        Require ($p.payload_on -eq 'occupied' -and $p.payload_off -eq 'clear') 'Incorrect occupancy mapping'
+        Require ($p.payload_on -eq $on -and $p.payload_off -eq 'clear') 'Incorrect occupancy mapping'
         Require ($p.state_topic.StartsWith($original.topic+'/')) 'Discovery must follow configured topic prefix'
     }
-    Require (($messages.payload.unique_id | Select-Object -Unique).Count -eq 3) 'Discovery IDs collide'
+    Require (($messages.payload.unique_id | Select-Object -Unique).Count -eq 4) 'Discovery IDs collide'
     $messages | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $out 'discovery.json')
     Save-Config @{ha_discovery=$false}
     $removed=(& "$PSScriptRoot/usb-command.ps1" -Port $Port -Command DISCOVERY -TimeoutSec 10) | ConvertFrom-Json

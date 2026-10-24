@@ -4,6 +4,7 @@
 #include <freertos/semphr.h>
 #include <cJSON.h>
 #include "Detector.h"
+#include "FireDetector.h"
 #include "Palette.h"
 #include "ToneMapping.h"
 namespace thermal {
@@ -17,6 +18,7 @@ struct Config {
   ToneMapping toneMapping = ToneMapping::Adaptive;
   bool haDiscovery = true;
   DetectionSettings detection;
+  FireSettings fire;
   uint32_t revision = 1;
 };
 class ConfigStore {

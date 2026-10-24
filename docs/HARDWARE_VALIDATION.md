@@ -6,6 +6,16 @@ Firmware 0.3.0 (2026-10-06) changes both video transports to YUY2. Hardware resu
 
 ## Development checks
 
+### Fire-temperature alerts (0.5.0, 2026-10-24)
+
+- Whole-image absolute-temperature monitoring is disabled by default, with an 80 C threshold, 10-second activation delay and 5-second clear delay. Startup/recovery warm-up is respected; occupancy background learning and relearning are independent.
+- Native fire tests passed for exact threshold boundaries, interrupted activation/clearing, repeated alerts, moving hottest pixels, occupancy ROI/relearning independence, warm-up, invalid frames, frame gaps, disable/re-enable, configuration reset and millisecond rollover. The existing detector, YUY2, video-timing and tone-mapping suites passed.
+- Both embedded JavaScript suites passed. Fire UI coverage includes old-config defaults, saved values, explicit saves, measurements, warm-up, sensor staleness, connection loss and monitoring while video is paused.
+- `scripts/test-fire-integration.ps1` passed against production configuration, fire JSON, discovery and network-loop code with host adapters and hash-pinned cJSON 1.7.19. It checks atomic rejection of invalid updates, partial updates, old defaults, serialization and simulated Preferences reload, event IDs, null peaks, heat discovery/availability, retained tombstones, QoS/retain, reconnect without offline replay, birth/30-second state refresh and MQTT suppression in test-pattern mode. Simulated Preferences reload does not validate physical NVS.
+- Maximum-prefix fire discovery payload measured 1,019 bytes. With MQTT framing/topic overhead it exceeds one 1,024-byte transfer buffer and uses the MQTT client's existing fragmentation support; staggered discovery plus queued-byte gating remains below the 4,096-byte outbox budget. Fire state/event packets fit within one transfer buffer.
+- Normal and test-pattern firmware compile with the pinned Arduino-ESP32 3.3.12 toolchain. Build logs: `.cache/build-fire-camera.log` and `.cache/build-fire-test-pattern.log`.
+- No firmware was flashed and no device settings were changed. Pending: real sensor threshold/timing checks after warm-up, live broker and Home Assistant discovery/state/events/reconnect/removal, hardware NVS reboot persistence, browser visual inspection and a simultaneous USB/browser/MQTT soak. Commission after installing 0.5.0; the older hardware results below do not validate fire detection.
+
 ### Adaptive thermal contrast (0.4.0, 2026-10-17)
 
 - Added a saved `tone_mapping` setting: `adaptive` by default, with `linear` preserving the previous renderer. A 128-bin globally contrast-limited histogram, linear blend, 2 C noise floor and 400 ms transfer damping run before shared YUY2 output. Temperature data and detector input are unchanged. See [research and design notes](THERMAL_CONTRAST.md).

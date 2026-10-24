@@ -3,4 +3,6 @@
 namespace thermal {
 String discoveryTopic(const char* id,ObjectClass objectClass);
 String discoveryJson(const Config& config,const char* id,ObjectClass objectClass);
+String fireDiscoveryTopic(const char* id);
+String fireDiscoveryJson(const Config& config,const char* id);
 }

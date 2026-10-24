@@ -49,6 +49,9 @@ void acquisitionTask(void*) {
   bool ready=detector && frame && (THERMAL_TEST_PATTERN || sensor.begin());
   Config cfg=configStore.get(); uint32_t revision=cfg.revision, relearn=relearnGeneration.load();
   if(detector) detector->configure(cfg.detection);
+  FireDetector fireDetector;
+  fireDetector.configure(cfg.fire);
+  FireDetection fireResult=fireDetector.unavailable(millis());
   uint32_t frames=0,lastValid=0,fpsStart=millis(),fpsFrames=0; float fps=0;
   uint32_t firstFrameMs=0,warmupRemaining=THERMAL_TEST_PATTERN?0:THERMAL_SENSOR_WARMUP_MS;
   uint32_t recoveries=0;
@@ -58,6 +61,7 @@ void acquisitionTask(void*) {
       if(ready && !THERMAL_TEST_PATTERN) sensor.pause();
       xSemaphoreTake(statusMutex,portMAX_DELAY);
       currentStatus.detection=detector?detector->unavailable(millis()):Detection{};
+      currentStatus.fire=fireResult=fireDetector.unavailable(millis());
       currentStatus.sensorReady=false;
       ++currentStatus.sensorConfigPauses;
       strlcpy(currentStatus.sensorError,"saving settings",sizeof(currentStatus.sensorError));
@@ -70,6 +74,7 @@ void acquisitionTask(void*) {
       configPause.resumed();
     }
     cfg=configStore.get();
+    if(revision!=cfg.revision) fireDetector.configure(cfg.fire);
     if (detector && (revision!=cfg.revision || relearn!=relearnGeneration.load())) {
       detector->configure(cfg.detection); revision=cfg.revision; relearn=relearnGeneration.load();
     }
@@ -79,6 +84,7 @@ void acquisitionTask(void*) {
       sensor.requestRecovery();
       xSemaphoreTake(statusMutex,portMAX_DELAY);
       currentStatus.detection=detector->unavailable(now);
+      currentStatus.fire=fireResult=fireDetector.unavailable(now);
       currentStatus.sensorReady=false;currentStatus.sensorRecovering=true;
       strlcpy(currentStatus.sensorError,sensor.error(),sizeof(currentStatus.sensorError));
       xSemaphoreGive(statusMutex);
@@ -100,6 +106,7 @@ void acquisitionTask(void*) {
       recoveries=sensor.recoveries();
       warmupStarted=false; warmupRemaining=THERMAL_SENSOR_WARMUP_MS;
       detector->unavailable(now);
+      fireResult=fireDetector.unavailable(now);
     }
     const bool recovering=!THERMAL_TEST_PATTERN && sensor.recovering();
     if(fresh) {
@@ -107,6 +114,7 @@ void acquisitionTask(void*) {
       const uint32_t warmingFor=uint32_t(now-firstFrameMs);
       warmupRemaining=!THERMAL_TEST_PATTERN && warmingFor<THERMAL_SENSOR_WARMUP_MS?THERMAL_SENSOR_WARMUP_MS-warmingFor:0;
       frame->detection=detector->process(frame->pixels,now,warmupRemaining>0);
+      fireResult=fireDetector.process(frame->pixels,now,warmupRemaining>0);
       if(frame->detection.state==Occupancy::Unavailable) fresh=false;
     }
     if(fresh) {
@@ -123,10 +131,12 @@ void acquisitionTask(void*) {
     xSemaphoreTake(statusMutex,portMAX_DELAY);
     if(fresh) currentStatus.detection=frame->detection;
     if(!healthy) {
+      fireResult=fireDetector.unavailable(now);
       currentStatus.detection=detector?detector->unavailable(now):Detection{};
       currentStatus.detection.state=Occupancy::Unavailable;
     }
     currentStatus.roi=cfg.detection.roi; currentStatus.frameSerial=frames;
+    currentStatus.fire=fireResult;
     currentStatus.flipHorizontal=cfg.flipHorizontal;
     currentStatus.palette=cfg.palette;
     currentStatus.toneMapping=cfg.toneMapping;
@@ -179,6 +189,7 @@ String detectionJson(const Status& s,bool event,ObjectClass objectClass) {
 String statusJson() {
   Status s=getStatus(); cJSON* root=cJSON_Parse(detectionJson(s,false).c_str());
   if(!root) return "{}";
+  cJSON_AddItemToObject(root,"fire",cJSON_Parse(fireJson(s,false).c_str()));
   // Keep status compact: do not duplicate device/ROI metadata or construct and
   // parse two complete MQTT payloads on this memory-constrained board.
   for(auto objectClass:{ObjectClass::Small,ObjectClass::Large}) {
@@ -226,7 +237,7 @@ String statusJson() {
   cJSON_AddNumberToObject(root,"last_failed_alloc_size",lastAllocSize.load());
   cJSON_AddNumberToObject(root,"last_failed_alloc_caps",lastAllocCaps.load());
   addNetworkDiagnostics(root);
-  cJSON_AddStringToObject(root,"firmware","0.4.0"); cJSON_AddStringToObject(root,"arduino","3.3.12");
+  cJSON_AddStringToObject(root,"firmware","0.5.0"); cJSON_AddStringToObject(root,"arduino","3.3.12");
   cJSON_AddStringToObject(root,"idf",esp_get_idf_version());
   cJSON_AddNumberToObject(root,"reset_reason",int(esp_reset_reason()));
   cJSON_AddBoolToObject(root,"mqtt_connected",mqttConnected.load());

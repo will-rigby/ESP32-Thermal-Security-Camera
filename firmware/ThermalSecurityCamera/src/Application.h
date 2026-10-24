@@ -14,6 +14,7 @@ struct Frame {
 };
 struct Status {
   Detection detection;
+  FireDetection fire;
   Roi roi;
   uint32_t frameSerial = 0, sensorErrors = 0, lastFrameMs = 0, bootId = 0;
   uint32_t sensorWarmupMs = 0;
@@ -35,5 +36,6 @@ Status getStatus();
 bool copyFrame(Frame& target, uint32_t afterSerial);
 String statusJson();
 String detectionJson(const Status& status, bool event,ObjectClass objectClass=ObjectClass::Any);
+String fireJson(const Status& status, bool event);
 void startApplication();
 }

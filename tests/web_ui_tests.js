@@ -8,7 +8,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
   const baseline=()=>({frames:10,sensor_ready:true,frame_age_ms:0,video_enabled:true,sensor_error:'none',
     state:'clear',sensor_warmup_ms:0,video_fps:7.4,video_target_fps:20,esp32_temperature_c:43.25,min_c:20,max_c:30,
     small:{state:'clear',pixels:0,peak_c:null},large:{state:'clear',pixels:0,peak_c:null},
-    wifi_connected:true,mqtt_configured:false,mqtt_connected:false,usb:'ready'});
+    fire:{state:'disabled',peak_c:null},wifi_connected:true,mqtt_configured:false,mqtt_connected:false,usb:'ready'});
   async function harness(header){
     let time=100,timerId=0,status=baseline(),mode='ok',failSave=false,lateResolve=null;
     const elements={},timers=new Map(),requests=[],rectangles=[],listeners={};
@@ -70,6 +70,19 @@ async function testWebUi(settingsHeader,viewerHeader) {
     h.status.video_target_fps=.1;await h.next();
     assert(h.api.video.rate===.1,name+': saved rate reaches active video');
     if(name==='settings'){
+      assert(el.fireState.textContent==='Disabled'&&el.firePeak.textContent==='—','Disabled fire status');
+      h.status.fire={state:'detected',peak_c:90.25};h.status.state='learning';await h.next();
+      assert(el.fireState.textContent==='Detected'&&el.firePeak.textContent==='90.3 °C','Fire independent of occupancy learning');
+      h.status.video_enabled=false;await h.next();
+      assert(el.fireState.textContent==='Detected','Fire continues with video paused');
+      h.status.video_enabled=true;h.status.sensor_warmup_ms=1000;await h.next();
+      assert(el.fireState.textContent==='Unavailable'&&el.firePeak.textContent==='—','Fire unavailable during warm-up');
+      h.status.sensor_warmup_ms=0;h.status.fire.state='clear';await h.next();
+      assert(el.fireState.textContent==='Clear','Fire clears');
+      h.status.fire={state:'unavailable',peak_c:null};await h.next();
+      assert(el.fireState.textContent==='Unavailable'&&el.firePeak.textContent==='—','Unknown fire peak hidden');
+      h.status.fire={state:'detected',peak_c:90};h.status.frame_age_ms=1500;await h.next();
+      assert(el.fireState.textContent==='Unavailable','Stale fire status hidden');h.status.frame_age_ms=0;
       assert(el.chipTemperature.textContent==='43.3 °C','Chip temperature formatted');
       h.status.esp32_temperature_c=null;await h.next();
       assert(el.chipTemperature.textContent==='Unavailable','Missing temperature clears old value');
@@ -100,7 +113,7 @@ async function testWebUi(settingsHeader,viewerHeader) {
     h.status=baseline();h.status.small.state='occupied';await h.next();await h.advance(1750);
     assert(state('small')==='unavailable',name+': frozen frame counter');
     h.status=baseline();h.status.frames=100;await h.next();
-    h.mode='reject';await h.next();assert(state('small')==='unavailable'&&!h.api.video.running,name+': failed request clears lights');
+    h.mode='reject';await h.next();if(name==='settings')assert(el.fireState.textContent==='Unavailable'&&el.firePeak.textContent==='—','Lost connection clears fire status');assert(state('small')==='unavailable'&&!h.api.video.running,name+': failed request clears lights');
     h.mode='ok';h.status=baseline();h.status.frames=120;await h.next();assert(state('small')==='clear',name+': network recovery');
     h.mode='bad';await h.next();assert(state('large')==='unavailable',name+': malformed status');
     h.mode='ok';h.status=baseline();h.status.frames=140;h.status.small.state='occupied';await h.next();
@@ -119,6 +132,8 @@ async function testWebUi(settingsHeader,viewerHeader) {
     }
   }
   const h=await harness(settingsHeader),el=h.elements;
+  assert(!el.fire_enabled.checked&&Number(el.fire_threshold_c.value)===80&&Number(el.fire_activate_ms.value)===10000&&Number(el.fire_clear_ms.value)===5000,'Old config fire defaults');
+  assert(!h.requests.some(r=>r.options.method==='PUT'),'Loading settings does not save');
   assert(el.palette.value==='ironbow'&&el.ha_discovery.checked,'Saved palette/discovery loaded');
   assert(el.tone_mapping.value==='adaptive','Old config defaults to Adaptive detail');
   assert(el.wifi_password.value===''&&el.mqtt_password.value==='','Passwords not populated');
@@ -134,10 +149,11 @@ async function testWebUi(settingsHeader,viewerHeader) {
   const pointer=(x,y)=>({clientX:x,clientY:y,pointerId:1});
   el.roi.onpointerdown(pointer(0,0));el.roi.onpointerup(pointer(320,248));
   el.palette.value='black_hot';el.large_min_pixels.value='24';el.ha_discovery.checked=false;
-  el.tone_mapping.value='linear';
+  el.tone_mapping.value='linear';el.fire_enabled.checked=true;el.fire_threshold_c.value='85.5';el.fire_activate_ms.value='15000';el.fire_clear_ms.value='2500';
   await el.settings.onsubmit({preventDefault(){}});
   let body=JSON.parse(h.requests.filter(r=>r.options.method==='PUT').at(-1).options.body);
   assert(body.palette==='black_hot'&&body.large_min_pixels===24&&body.ha_discovery===false,'Settings fields saved');
+  assert(body.fire_enabled===true&&body.fire_threshold_c===85.5&&body.fire_activate_ms===15000&&body.fire_clear_ms===2500,'Fire settings saved');
   assert(body.tone_mapping==='linear','Contrast mode saved independently of palette');
   assert(body.roi.x===0&&body.roi.width===80&&body.roi.height===62,'Flipped full-image ROI mapping');
   assert(!('wifi_password'in body)&&!('mqtt_password'in body),'Blank passwords omitted');
@@ -146,6 +162,9 @@ async function testWebUi(settingsHeader,viewerHeader) {
   assert(body.wifi_password==='','Explicit password clear');
   h.failSave=true;await el.settings.onsubmit({preventDefault(){}});
   assert(el.message.textContent==='Rejected settings'&&!el.save.disabled,'Failed save feedback');
+  Object.assign(config,{fire_enabled:true,fire_threshold_c:85.5,fire_activate_ms:15000,fire_clear_ms:2500});
+  const saved=(await harness(settingsHeader)).elements;
+  assert(saved.fire_enabled.checked&&Number(saved.fire_threshold_c.value)===85.5&&Number(saved.fire_activate_ms.value)===15000&&Number(saved.fire_clear_ms.value)===2500,'Saved fire controls load');
   await el.learn.onclick();assert(h.requests.at(-1).path==='/api/relearn','Relearn action preserved');
   assert(!viewerHeader.includes('<form')&&viewerHeader.includes('href="/settings"'),'Viewer/settings split');
   assert(viewerHeader.includes('prefers-reduced-motion')&&settingsHeader.includes('prefers-reduced-motion'),'Reduced motion');
